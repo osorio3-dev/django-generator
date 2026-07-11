@@ -18,6 +18,7 @@ _exclude:
   - "copier.yaml"
   - "docs"
   - "scripts/validate_modules.py"
+  - "slugify"
   - ".agents/atl/**"
   - ".agents/.skill-registry.cache.json"
   - ".codegraph/**"
@@ -42,8 +43,8 @@ project_name:
 
 project_slug:
   type: str
-  help: "Identificador Python-safe (snake_case). Usado para carpeta raíz, paquete config, pyproject name"
-  placeholder: "my_django_project"
+  help: "Identificador Python-safe (snake_case). Usado para carpeta raíz, paquete config, pyproject name. Default: derivado de project_name."
+  default: "{% from 'slugify.jinja' import slugify %}{{ slugify(project_name) }}"
   validator: "{% if not (project_slug | regex_search('^[a-z][a-z0-9_]*$')) %}Use snake_case lowercase; start with a letter.{% endif %}"
 
 author_name:
@@ -177,28 +178,16 @@ jobs_backend:
   help: "Broker de django-q2. 'orm' = tu DB existente, cero infra. 'redis' = requiere Redis."
 
 # -----------------------------------------------------------------------------
-# Módulos opt-in (multi-select JSON)
+# Módulos opt-in (atajos sí/no individuales)
+#
+# El usuario responde cada módulo como bool. Internamente se consolidan en
+# `optional_modules` (computed, más abajo) para que las plantillas `.jinja`
+# puedan seguir usando la convención `'module-X' in optional_modules`.
+#
+# El refactor del computed `optional_modules` se hizo para que el usuario
+# NUNCA tenga que escribir JSON en el wizard. Cada módulo es una pregunta
+# booleana explícita.
 # -----------------------------------------------------------------------------
-optional_modules:
-  type: json
-  default: '[]'
-  help: |
-    Lista de módulos a incluir. Opciones válidas (separadas por coma):
-      module-secure-endpoints, module-wompi, module-ghl, module-supabase,
-      module-multitenant, module-realtime, module-django-guard,
-      module-autologin-tests360, module-debug-toolbar, module-docker,
-      module-precommit, module-github-ci
-    Ejemplo: ["module-docker", "module-precommit", "module-github-ci"]
-  validator: >-
-    {% set valid_modules = [
-      'module-secure-endpoints', 'module-wompi', 'module-ghl', 'module-supabase',
-      'module-multitenant', 'module-realtime', 'module-django-guard',
-      'module-autologin-tests360', 'module-debug-toolbar', 'module-docker',
-      'module-precommit', 'module-github-ci'
-    ] %}
-    {% set invalid_modules = optional_modules | reject('in', valid_modules) | list %}
-    {% if invalid_modules %}optional_modules inválidos: {{ invalid_modules | join(', ') }}{% endif %}
-
 include_multitenant:
   type: bool
   default: false
@@ -213,9 +202,41 @@ multitenant_isolation:
   when: "{{ include_multitenant }}"
   help: "logical = TenantMiddleware + TenantAwareModelMixin (un DB). schema = schema-per-tenant (usa django-multitenant)."
 
-# -----------------------------------------------------------------------------
-# Atajos para no obligar a escribir JSON
-# -----------------------------------------------------------------------------
+include_secure_endpoints:
+  type: bool
+  default: false
+  help: "HMAC verifier + Idempotency-Key + AuditLog (apps/core/{idempotency,audit,webhooks}/). Activa Fernet."
+
+include_wompi:
+  type: bool
+  default: false
+  help: "State machine de pagos Wompi (Colombia) en apps/payments/wompi/. Activa Fernet."
+
+include_ghl:
+  type: bool
+  default: false
+  help: "OAuth + cliente v2 de GoHighLevel con retry/backoff en apps/integrations/ghl/. Activa Fernet."
+
+include_supabase:
+  type: bool
+  default: false
+  help: "Cliente Supabase (anon lectura + service_role mutación split) en apps/integrations/supabase/. Activa Fernet."
+
+include_realtime:
+  type: bool
+  default: false
+  help: "Channels + channels-redis en apps/realtime/ (cambia ASGI)."
+
+include_django_guard:
+  type: bool
+  default: false
+  help: "Permisos por objeto con django-guard."
+
+include_autologin_tests360:
+  type: bool
+  default: false
+  help: "Magic-links POST-only (NO GET) en apps/accounts/autologin/. Activa Fernet."
+
 include_docker:
   type: bool
   default: false
@@ -252,6 +273,29 @@ django_settings_module:
   default: "config.settings"
   when: false
   help: "Ruta al paquete de settings. Default: 'config.settings' (el slug del proyecto es el nombre de la carpeta, no del paquete Python)."
+
+# Consolidación de los atajos sí/no en una lista 'module-X' que las plantillas
+# consumen con la convención `'module-X' in optional_modules`. Computed para que
+# el usuario NUNCA tenga que escribir JSON en el wizard.
+optional_modules:
+  type: json
+  default: >-
+    {%- set mods = [] -%}
+    {%- if include_multitenant %}{%- set _ = mods.append('module-multitenant') %}{%- endif -%}
+    {%- if include_secure_endpoints %}{%- set _ = mods.append('module-secure-endpoints') %}{%- endif -%}
+    {%- if include_wompi %}{%- set _ = mods.append('module-wompi') %}{%- endif -%}
+    {%- if include_ghl %}{%- set _ = mods.append('module-ghl') %}{%- endif -%}
+    {%- if include_supabase %}{%- set _ = mods.append('module-supabase') %}{%- endif -%}
+    {%- if include_realtime %}{%- set _ = mods.append('module-realtime') %}{%- endif -%}
+    {%- if include_django_guard %}{%- set _ = mods.append('module-django-guard') %}{%- endif -%}
+    {%- if include_autologin_tests360 %}{%- set _ = mods.append('module-autologin-tests360') %}{%- endif -%}
+    {%- if include_docker %}{%- set _ = mods.append('module-docker') %}{%- endif -%}
+    {%- if include_precommit %}{%- set _ = mods.append('module-precommit') %}{%- endif -%}
+    {%- if include_github_actions %}{%- set _ = mods.append('module-github-ci') %}{%- endif -%}
+    {%- if include_debug_toolbar %}{%- set _ = mods.append('module-debug-toolbar') %}{%- endif -%}
+    {{ mods | to_json }}
+  when: false
+  help: "Lista consolidada computed a partir de los atajos include_*. Las plantillas .jinja la consumen con 'module-X' in optional_modules."
 
 # -----------------------------------------------------------------------------
 # Confirmación

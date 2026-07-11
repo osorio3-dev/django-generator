@@ -1,0 +1,27 @@
+{#- Macro: slugify(value)
+   Convierte un string human-readable a snake_case identificador Python-safe.
+   Usado por copier.yml para derivar project_slug desde project_name.
+
+   Reglas:
+     - lowercase
+     - acentos → ASCII (á → a, ñ → n, etc.)
+     - cualquier run de no-[a-z0-9] → '_'
+     - strip '_' al inicio y al final
+     - si queda vacío, devuelve 'project'
+-#}
+{% macro slugify(value) -%}
+{% set ns = namespace(s=value | lower) -%}
+{% set replacements = [
+    ('á', 'a'), ('é', 'e'), ('í', 'i'), ('ó', 'o'), ('ú', 'u'),
+    ('à', 'a'), ('è', 'e'), ('ì', 'i'), ('ò', 'o'), ('ù', 'u'),
+    ('ä', 'a'), ('ë', 'e'), ('ï', 'i'), ('ö', 'o'), ('ü', 'u'),
+    ('â', 'a'), ('ê', 'e'), ('î', 'i'), ('ô', 'o'), ('û', 'u'),
+    ('ã', 'a'), ('õ', 'o'), ('ñ', 'n'), ('ç', 'c'),
+] -%}
+{% for src, dst in replacements -%}
+{% set ns.s = ns.s.replace(src, dst) -%}
+{% endfor -%}
+{% set ns.s = ns.s | regex_replace('[^a-z0-9]+', '_') -%}
+{% set ns.s = ns.s.strip('_') -%}
+{% if ns.s %}{{ ns.s }}{% else %}project{% endif -%}
+{%- endmacro %}

@@ -1,3 +1,4 @@
+{% set _docker = include_docker or 'module-docker' in optional_modules -%}
 # syntax=docker/dockerfile:1.7
 # Multi-stage Dockerfile for {{ project_name }}.
 #

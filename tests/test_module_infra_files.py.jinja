@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 
-DOCKER_ACTIVE = {% if include_docker %}True{% else %}False{% endif %}
-PRECOMMIT_ACTIVE = {% if include_precommit %}True{% else %}False{% endif %}
-GITHUB_CI_ACTIVE = {% if include_github_actions %}True{% else %}False{% endif %}
+DOCKER_ACTIVE = {% if include_docker or 'module-docker' in optional_modules %}True{% else %}False{% endif %}
+PRECOMMIT_ACTIVE = {% if include_precommit or 'module-precommit' in optional_modules %}True{% else %}False{% endif %}
+GITHUB_CI_ACTIVE = {% if include_github_actions or 'module-github-ci' in optional_modules %}True{% else %}False{% endif %}
 
 
 # ── module-docker ───────────────────────────────────────────────────────

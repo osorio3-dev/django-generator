@@ -1,3 +1,4 @@
+{% set _debug_toolbar = include_debug_toolbar or 'module-debug-toolbar' in optional_modules %}
 """Local development settings — DEBUG=True, SQLite, console email."""
 
 from config.settings.base import *  # noqa: F403
@@ -25,7 +26,7 @@ CACHES = {
 # admin=unfold: relax email verification in dev so we can log in immediately.
 ACCOUNT_EMAIL_VERIFICATION = "none"  # noqa: F405
 {%- endif %}
-{% if include_debug_toolbar %}
+{% if _debug_toolbar %}
 # ---------------------------------------------------------------------------
 # django-debug-toolbar (module-debug-toolbar — local dev only)
 # ---------------------------------------------------------------------------

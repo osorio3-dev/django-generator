@@ -11,7 +11,7 @@ Skipped when include_debug_toolbar is not active.
 import pytest
 from django.conf import settings
 
-DEBUG_TOOLBAR_ACTIVE = {% if include_debug_toolbar %}True{% else %}False{% endif %}
+DEBUG_TOOLBAR_ACTIVE = {% if include_debug_toolbar or 'module-debug-toolbar' in optional_modules %}True{% else %}False{% endif %}
 
 
 pytestmark = pytest.mark.skipif(

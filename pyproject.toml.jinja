@@ -1,3 +1,7 @@
+{% set _docker = include_docker or 'module-docker' in optional_modules %}
+{% set _precommit = include_precommit or 'module-precommit' in optional_modules %}
+{% set _github_actions = include_github_actions or 'module-github-ci' in optional_modules %}
+{% set _debug_toolbar = include_debug_toolbar or 'module-debug-toolbar' in optional_modules %}
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -98,7 +102,7 @@ dev = [
     "ruff>=0.15,<1.0",
     "mypy>=1.15,<2.0",
     "django-stubs>=5.1,<6.0",
-{%- if include_debug_toolbar %}
+{%- if _debug_toolbar %}
     "django-debug-toolbar>=4.4,<6.0",
 {%- endif %}
 {%- if 'module-realtime' in optional_modules %}

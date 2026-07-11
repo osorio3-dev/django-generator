@@ -1,3 +1,4 @@
+{% set _docker = include_docker or 'module-docker' in optional_modules -%}
 # Files to exclude from the Docker build context.
 # Activated only when module-docker is selected.
 

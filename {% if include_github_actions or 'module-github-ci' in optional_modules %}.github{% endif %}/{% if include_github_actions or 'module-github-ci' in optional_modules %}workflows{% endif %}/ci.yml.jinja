@@ -1,3 +1,4 @@
+{% set _github_actions = include_github_actions or 'module-github-ci' in optional_modules -%}
 {# GitHub Actions CI workflow.
 
 Jinja escapes: GitHub's ${{ ... }} syntax conflicts with Jinja. We wrap

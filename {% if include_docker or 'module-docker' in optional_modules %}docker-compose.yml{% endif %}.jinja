@@ -1,3 +1,4 @@
+{% set _docker = include_docker or 'module-docker' in optional_modules -%}
 # docker-compose for {{ project_name }}.
 #
 # Activated only when module-docker is selected. Brings up:

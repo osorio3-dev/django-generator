@@ -1,0 +1,32 @@
+{% if frontend and frontend_style == 'vue-spa' %}
+// Vue SPA entry: webpack-style imports get bundled by Vite. The build output
+// is written to static/dist/manifest.json so django-vite can resolve URLs.
+import { createApp } from 'vue';
+import { createRouter, createWebHistory } from 'vue-router';
+{%- if vue_router == 'hash' %}
+import { createWebHashHistory } from 'vue-router';
+{%- endif %}
+import App from './components/App.vue';
+import Home from './components/Pages/Home.vue';
+import Dashboard from './components/Pages/Dashboard.vue';
+import 'preline';
+
+const projectName = {{ project_name | tojson }};
+
+const router = createRouter({
+  history: {% if vue_router == 'hash' %}createWebHashHistory(){% else %}createWebHistory(){% endif %},
+  routes: [
+    { path: '/', component: Home, name: 'home', props: { projectName } },
+    { path: '/dashboard', component: Dashboard, name: 'dashboard' },
+  ],
+});
+
+const app = createApp(App, { brand: projectName });
+app.use(router);
+app.mount('#app');
+{% else %}
+// server-rendered projects use static/js/main.js instead of this file.
+// This stub keeps the directory consistent across styles and avoids an empty
+// file confusing diffs. Vite ignores this file when frontend_style is
+// server-rendered (the vite.config.ts input points at static/js/main.js).
+{% endif %}

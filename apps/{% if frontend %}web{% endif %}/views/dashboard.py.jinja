@@ -1,0 +1,16 @@
+"""Auth-protected dashboard view."""
+
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
+from django.views.decorators.http import require_GET
+
+
+@require_GET
+@login_required
+def dashboard(request):
+    """Render the dashboard, only for authenticated users."""
+    return render(
+        request,
+        "base.html",
+        {"section": "dashboard", "user": request.user},
+    )

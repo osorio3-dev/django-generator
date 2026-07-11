@@ -1,0 +1,16 @@
+"""Views for the web app.
+
+Three views, each in its own module (django-patterns convention; never a flat
+``views.py`` when the surface grows beyond a single landing):
+
+- ``landing`` — public homepage.
+- ``dashboard`` — auth-protected page using ``django.contrib.auth.decorators.login_required``.
+- ``health_frontend`` — frontend-side health endpoint, kept separate from
+  ``apps.core.views.health`` so monitoring can distinguish backend vs. UI status.
+"""
+
+from apps.web.views.dashboard import dashboard
+from apps.web.views.health_frontend import health_frontend
+from apps.web.views.landing import landing
+
+__all__ = ["dashboard", "health_frontend", "landing"]

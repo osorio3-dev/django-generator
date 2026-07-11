@@ -1,0 +1,15 @@
+"""Frontend health endpoint.
+
+Distinct from ``apps.core.views.health_check`` so monitoring can tell whether
+the backend or the rendered UI surface is degraded. Currently returns a
+constant payload; extend with template render check, asset 200-check, etc.
+"""
+
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
+
+
+@require_GET
+def health_frontend(request):
+    """Return a simple frontend health check response."""
+    return JsonResponse({"status": "ok", "surface": "frontend"})

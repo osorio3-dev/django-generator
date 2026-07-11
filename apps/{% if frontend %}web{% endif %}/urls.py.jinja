@@ -1,0 +1,22 @@
+"""URLs for the web app.
+
+Mounted at the project root from ``config/urls.py`` when ``frontend=true``.
+The app_name is ``"web"`` so reverse lookups work as ``reverse("web:landing")``.
+
+For ``vue-spa``, the SPA catch-all in ``config/urls.py`` shadows ``landing`` and
+``dashboard`` so the SPA owns client-side routes. ``health_frontend`` is the
+one URL kept server-side because it's used by monitoring tools that expect a
+real JSON response.
+"""
+
+from django.urls import path
+
+from apps.web import views
+
+app_name = "web"
+
+urlpatterns = [
+    path("", views.landing, name="landing"),
+    path("dashboard/", views.dashboard, name="dashboard"),
+    path("health/frontend/", views.health_frontend, name="health_frontend"),
+]

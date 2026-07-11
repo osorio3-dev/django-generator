@@ -1,0 +1,14 @@
+"""Public landing page view (server-rendered)."""
+
+from django.shortcuts import render
+from django.views.decorators.http import require_GET
+
+
+@require_GET
+def landing(request):
+    """Render the homepage.
+
+    Uses ``templates/base.html`` as the layout. The template author fills the
+    ``content`` block.
+    """
+    return render(request, "base.html", {"section": "home"})

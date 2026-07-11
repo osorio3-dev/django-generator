@@ -14,17 +14,18 @@ evolucionar proyectos con migrations declarativas en vez de overwrite.
 
 ```bash
 # Interactivo — te pregunta todo
-copier copy /path/to/django-generator /ruta/al/nuevo_proyecto
+# Directamente desde GitHub (recomendado):
+copier copy gh:osorio3-dev/django-generator /ruta/al/nuevo_proyecto
 
 # Con todas las respuestas por CLI (útil en CI)
 copier copy --defaults \
   -d project_name="Mi App" -d project_slug=mi_app \
   -d admin=true -d frontend=true -d frontend_style=server-rendered \
-  /path/to/django-generator /ruta/al/nuevo_proyecto
+  gh:osorio3-dev/django-generator /ruta/al/nuevo_proyecto
 
 # Con un archivo de respuestas
 copier copy --force --trust --data-file answers.yml \
-  /path/to/django-generator /ruta/al/nuevo_proyecto
+  gh:osorio3-dev/django-generator /ruta/al/nuevo_proyecto
 ```
 
 ### Setup post-generación
@@ -246,9 +247,7 @@ extenderlas, copialas y versionálas localmente.
 ```
 django-generator/                              ← el generador (no el generado)
 ├── copier.yml                                 ← schema de preguntas (locked en DESIGN §9)
-├── DESIGN.md (externo)                        ← 1013 líneas, fuente de verdad
-├── README.md                                  ← este archivo
-├── CHANGELOG.md                               ← historial de phases
+├── README.md.jinja                            ← template → README.md en cada proyecto generado
 ├── pyproject.toml.jinja                       ← deps condicionales
 ├── manage.py.jinja
 ├── pytest.ini.jinja
@@ -256,6 +255,9 @@ django-generator/                              ← el generador (no el generado)
 ├── .editorconfig                              ← estático (sin .jinja)
 ├── .gitignore
 ├── .env.example.jinja
+├── docs/                                      ← docs del generador (no se copian a proyectos)
+│   ├── README.md                              ← este archivo
+│   └── CHANGELOG.md                           ← historial de phases
 ├── apps/
 │   ├── core/                                  ← siempre generado
 │   ├── accounts/                              ← solo si admin=unfold
@@ -321,11 +323,11 @@ DEBUG=true DJANGO_SETTINGS_MODULE=config.settings.test DJANGO_ENVIRONMENT=test \
 
 ## Licencia
 
-MIT — Gentleman Programming.
+MIT — Jhonatan OSorio.
 
 ## Referencias
 
-- [DESIGN.md](../django-generator-design/DESIGN.md) — fuente de verdad (1013 líneas)
+- [DESIGN.md](../../django-generator-design/DESIGN.md) — fuente de verdad (1013 líneas, repo externo)
 - [Copier docs](https://copier.readthedocs.io/) — `copier copy`, `copier update`
 - [django-unfold](https://github.com/unfoldadmin/django-unfold) — admin por defecto
 - [django-cotton](https://github.com/wrabit/django-cotton) — componentes server-rendered

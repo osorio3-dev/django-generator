@@ -75,4 +75,7 @@ junit.xml
 .envrc
 
 # Copier answers (kept in-repo on purpose so `copier update` works)
-# .copier-answers.yml
+# .copier-answers.yml?
+#
+
+.atl

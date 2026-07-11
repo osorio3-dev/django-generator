@@ -8,14 +8,15 @@
 _minimum_copier_version: "9.0"
 _templates_suffix: ".jinja"
 
-# Files at the generator root that must NEVER be copied into generated projects.
+# Files/dirs at the generator root that must NEVER be copied into generated projects.
 # Note: .gitignore and pyproject.toml are templates — they ARE copied to projects.
+# Note: README.md and CHANGELOG.md live in docs/ — the generator's own docs,
+# not templates. They are excluded as a whole folder so the root README.md.jinja
+# can render to README.md in the generated project without colliding.
 _exclude:
   - "copier.yml"
   - "copier.yaml"
-  - "README.md"
-  - "DESIGN.md"
-  - "CHANGELOG.md"
+  - "docs"
   - "scripts/validate_modules.py"
   - ".agents/atl/**"
   - ".agents/.skill-registry.cache.json"
@@ -48,7 +49,7 @@ project_slug:
 author_name:
   type: str
   help: "Tu nombre o el del equipo (aparece en pyproject y LICENSE)"
-  default: "Gentleman Programming"
+  default: "Jhonatan OSorio"
 
 python_version:
   type: str
@@ -62,6 +63,22 @@ django_version:
   default: "6.0"
   choices:
     - "6.0"
+
+# -----------------------------------------------------------------------------
+# Upstream repo (computed, no prompt) — usado por README.md.jinja para el link
+# "Generado con django-generator". Override con -d github_user=foo -d github_repo=bar.
+# -----------------------------------------------------------------------------
+github_user:
+  type: str
+  default: "osorio3-dev"
+  when: false
+  help: "Usuario/org de GitHub dueño del generador (sólo se usa si no se override por CLI)."
+
+github_repo:
+  type: str
+  default: "django-generator"
+  when: false
+  help: "Nombre del repo del generador en GitHub."
 
 database:
   type: str

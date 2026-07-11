@@ -10,6 +10,12 @@ urlpatterns = [
 {% if admin %}
 # admin=unfold
 from django.contrib import admin  # noqa: E402
+from unfold.sites import UnfoldAdminSite  # noqa: E402
+
+# Monkey-patch the default admin site to use Unfold's site class. This must
+# run before admin.site.urls is built (or any ModelAdmin is registered) so
+# Unfold takes over the rendering without re-registering every admin.
+admin.site.__class__ = UnfoldAdminSite  # noqa: E402
 
 from allauth.account.decorators import secure_admin_login  # noqa: E402
 

@@ -1,0 +1,55 @@
+"""Supabase integration — anon and service_role clients.
+
+Anti-pattern avoided (inpacto-pagos-ghl audit): the service_role key is
+NEVER exposed to the browser. It's a backend-only bypass that ignores RLS.
+The anon key + RLS is the only thing the SPA ever sees.
+"""
+
+from __future__ import annotations
+
+from django.db import models
+
+from apps.core.models.base import BaseModel
+{% if persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules %}
+from apps.core.models.fields import EncryptedCharField
+{% endif %}
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+from apps.tenants.mixins import TenantAwareModelMixin
+from apps.tenants.models import Tenant
+{% endif %}
+
+
+class SupabaseConfig(BaseModel):
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+    """One row per tenant — each tenant has its own Supabase project (or its
+    own RLS-scoped role in a shared project).
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="supabase_configs"
+    )
+{% else %}
+    """Single-row config — one Supabase project per Django app.
+    """
+
+    name = models.CharField(max_length=200, default="default")
+{% endif %}
+    project_url = models.URLField()
+{% if persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules %}
+    # anon key CAN be exposed to the client, but we still encrypt it at rest.
+    anon_key = EncryptedCharField(max_length=2048)
+    # service_role MUST NOT be exposed to the client. Backend only.
+    service_role_key = EncryptedCharField(max_length=2048)
+{% else %}
+    anon_key = models.CharField(max_length=2048)
+    service_role_key = models.CharField(max_length=2048)
+{% endif %}
+    jwt_secret = models.CharField(max_length=255, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Supabase configuration"
+        verbose_name_plural = "Supabase configurations"
+
+    def __str__(self) -> str:
+        return f"Supabase {self.project_url}"

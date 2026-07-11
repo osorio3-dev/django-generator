@@ -1,0 +1,59 @@
+"""Supabase service_role REST client (backend-only bypass).
+
+The service_role key IGNORES Row-Level Security. Use it ONLY for backend
+admin operations: cross-tenant data migrations, webhooks ingesting data
+from external systems that should bypass RLS, etc.
+
+NEVER expose this client or its key to the browser. NEVER pass user input
+directly to it without explicit authorization checks at the Django layer.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+
+class SupabaseServiceRoleClient:
+    """REST client that bypasses RLS. Backend-only."""
+
+    def __init__(self, project_url: str, service_role_key: str, *, timeout: float = 15.0) -> None:
+        if not project_url or not service_role_key:
+            raise ValueError("project_url and service_role_key are required.")
+        self.base_url = project_url.rstrip("/")
+        self.service_role_key = service_role_key
+        self._timeout = timeout
+
+    def _headers(self, *, extra: dict | None = None) -> dict:
+        return {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **(extra or {}),
+        }
+
+    def select(self, table: str, *, columns: str = "*", limit: int | None = None) -> list[dict]:
+        params: dict[str, Any] = {"select": columns}
+        if limit:
+            params["limit"] = str(limit)
+        url = f"{self.base_url}/rest/v1/{table}"
+        r = httpx.get(url, params=params, headers=self._headers(), timeout=self._timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def upsert(self, table: str, payload: dict | list[dict]) -> list[dict]:
+        """Upsert (insert or update) rows. RLS bypassed."""
+        url = f"{self.base_url}/rest/v1/{table}"
+        headers = self._headers(extra={"Prefer": "return=representation,resolution=merge-duplicates"})
+        body = payload if isinstance(payload, list) else [payload]
+        r = httpx.post(url, json=body, headers=headers, timeout=self._timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def delete(self, table: str, *, filters: dict[str, Any]) -> None:
+        params = {k: f"eq.{v}" for k, v in filters.items()}
+        url = f"{self.base_url}/rest/v1/{table}"
+        r = httpx.delete(url, params=params, headers=self._headers(), timeout=self._timeout)
+        r.raise_for_status()

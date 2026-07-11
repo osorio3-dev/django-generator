@@ -1,0 +1,15 @@
+"""Supabase admin (Unfold)."""
+
+from django.contrib import admin
+from unfold.admin import ModelAdmin
+
+from apps.integrations.supabase.models import SupabaseConfig
+
+
+@admin.register(SupabaseConfig)
+class SupabaseConfigAdmin(ModelAdmin):
+    list_display = ("project_url", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("project_url",)
+    # Anti-pattern rule: service_role must never be exposed via admin.
+    exclude = ("service_role_key", "anon_key", "jwt_secret")

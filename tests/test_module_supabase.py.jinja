@@ -1,0 +1,102 @@
+"""Tests for module-supabase.
+
+Asserts:
+- Anon client rejects missing credentials.
+- Service-role client rejects missing credentials.
+- Anon client sends apikey + Bearer with the anon key (NOT service_role).
+- Service-role client sends apikey + Bearer with the service_role key.
+- SupabaseConfig stores keys encrypted when Fernet is active.
+
+Skipped when module-supabase is not active.
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+SUPABASE_ACTIVE = {% if 'module-supabase' in optional_modules %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not SUPABASE_ACTIVE,
+    reason="module-supabase not active in this project",
+)
+
+
+def test_anon_client_requires_credentials():
+    from apps.integrations.supabase.services.anon_client import SupabaseAnonClient
+
+    with pytest.raises(ValueError):
+        SupabaseAnonClient("", "")
+    with pytest.raises(ValueError):
+        SupabaseAnonClient("https://x.supabase.co", "")
+    with pytest.raises(ValueError):
+        SupabaseAnonClient("", "anon-key")
+
+
+def test_service_role_client_requires_credentials():
+    from apps.integrations.supabase.services.service_client import SupabaseServiceRoleClient
+
+    with pytest.raises(ValueError):
+        SupabaseServiceRoleClient("", "")
+    with pytest.raises(ValueError):
+        SupabaseServiceRoleClient("https://x.supabase.co", "")
+
+
+def test_anon_client_sends_correct_headers():
+    from apps.integrations.supabase.services.anon_client import SupabaseAnonClient
+
+    client = SupabaseAnonClient("https://x.supabase.co", "anon-xyz")
+    with patch("apps.integrations.supabase.services.anon_client.httpx.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            status_code=200, is_success=True, json=lambda: [{"id": 1}], raise_for_status=lambda: None,
+        )
+        client.select("users")
+
+    call = mock_get.call_args
+    headers = call.kwargs["headers"]
+    assert headers["apikey"] == "anon-xyz"
+    assert headers["Authorization"] == "Bearer anon-xyz"
+
+
+def test_service_role_client_sends_correct_headers():
+    from apps.integrations.supabase.services.service_client import SupabaseServiceRoleClient
+
+    client = SupabaseServiceRoleClient("https://x.supabase.co", "service-xyz")
+    with patch("apps.integrations.supabase.services.service_client.httpx.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            status_code=200, is_success=True, json=lambda: [{"id": 1}], raise_for_status=lambda: None,
+        )
+        client.select("users")
+
+    call = mock_get.call_args
+    headers = call.kwargs["headers"]
+    assert headers["apikey"] == "service-xyz"
+    assert headers["Authorization"] == "Bearer service-xyz"
+
+
+@pytest.mark.django_db
+def test_supabase_config_stores_keys_encrypted():
+    if not {{ 'True' if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) else 'False' }}:
+        pytest.skip("Fernet not active — keys stored as plain CharField.")
+
+    from apps.integrations.supabase.models import SupabaseConfig
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+    from apps.tenants.models import Tenant
+
+    tenant = Tenant.all_objects.create(name="Acme", slug="acme", location_id="loc-acme")
+{%- endif %}
+
+    cfg = SupabaseConfig.all_objects.create(
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+        tenant=tenant,
+{%- endif %}
+        project_url="https://abc.supabase.co",
+        anon_key="anon-xxx",
+        service_role_key="service-xxx",
+        jwt_secret="jwt-xxx",
+        is_active=True,
+    )
+    cfg.refresh_from_db()
+    assert cfg.anon_key.startswith("gAAAAA")
+    assert cfg.service_role_key.startswith("gAAAAA")

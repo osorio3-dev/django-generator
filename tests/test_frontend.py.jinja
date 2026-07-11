@@ -1,0 +1,205 @@
+"""Smoke tests for the ``frontend`` axis.
+
+Skipped entirely when ``frontend=false``. Asserts the locked-in contracts:
+
+- ``apps.web`` is a registered Django app (PROJECT_APPS).
+- ``django_htmx``, ``django_cotton``, and ``django_vite`` are wired in INSTALLED_APPS
+  per DESIGN.md §4 (the second two are present in both styles).
+- The HtmxMiddleware is mounted in MIDDLEWARE for both styles.
+- The landing view renders a 200 response and surfaces the project name in the body.
+- The health_frontend endpoint returns 200 with the frontend-tagged payload.
+- The vite config and package.json exist with the expected package manager pin
+  and one consistent dependency set per style.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from django.conf import settings
+
+
+pytestmark = pytest.mark.skipif(
+    "apps.web" not in settings.INSTALLED_APPS,
+    reason="frontend=false — apps.web and the frontend stack are not generated",
+)
+
+
+def test_web_app_is_installed():
+    """``apps.web`` must be in INSTALLED_APPS when frontend=true."""
+    assert "apps.web" in settings.INSTALLED_APPS
+
+
+def test_django_htmx_app_is_installed():
+    """django_htmx is in INSTALLED_APPS for both frontend styles."""
+    assert "django_htmx" in settings.INSTALLED_APPS
+
+
+def test_django_cotton_app_is_installed():
+    """django_cotton is in INSTALLED_APPS only for server-rendered style.
+
+    Vue-spa uses inline Vue templates, so django-cotton is unnecessary.
+    """
+    vite_content = (_project_root() / "vite.config.ts").read_text()
+    is_vue_spa = "vue()" in vite_content
+    if is_vue_spa:
+        # Vue-spa does not use django-cotton (templates are .vue files).
+        assert "django_cotton" not in settings.INSTALLED_APPS, (
+            "django_cotton must NOT be installed for vue-spa"
+        )
+    else:
+        assert "django_cotton" in settings.INSTALLED_APPS, (
+            "django_cotton must be installed for server-rendered"
+        )
+
+
+def test_django_vite_app_is_installed():
+    """django_vite is in INSTALLED_APPS for both frontend styles."""
+    assert "django_vite" in settings.INSTALLED_APPS
+
+
+def test_htmx_middleware_is_wired():
+    """HtmxMiddleware must be present in MIDDLEWARE (django-htmx contracts)."""
+    middleware = settings.MIDDLEWARE
+    assert "django_htmx.middleware.HtmxMiddleware" in middleware, (
+        f"HtmxMiddleware missing from MIDDLEWARE. Got: {middleware}"
+    )
+
+
+@pytest.mark.django_db
+def test_landing_page_renders(client):
+    """The landing view returns 200."""
+    from django.urls import reverse
+
+    response = client.get(reverse("web:landing"))
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_landing_page_surfaces_project_name(client):
+    """The landing view body contains the project name baked at copy time.
+
+    For ``server-rendered`` this is asserted by the rendered ``base.html``
+    block title; for ``vue-spa`` the catch-all renders ``vue_spa.html`` whose
+    ``<title>`` also includes ``{{ project_name }}``.
+    """
+    from django.urls import reverse
+
+    response = client.get(reverse("web:landing"))
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_health_frontend_returns_ok(client):
+    """The health_frontend endpoint returns the frontend-tagged payload."""
+    from django.urls import reverse
+
+    response = client.get(reverse("web:health_frontend"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["surface"] == "frontend"
+
+
+# ---------------------------------------------------------------------------
+# Filesystem-level assertions (vite.config + package.json presence)
+# ---------------------------------------------------------------------------
+def _project_root() -> Path:
+    return Path(settings.BASE_DIR)
+
+
+def test_package_json_exists_with_pinned_manager():
+    """``package.json`` exists and pins packageManager (npm or bun, never both)."""
+    pkg_path = _project_root() / "package.json"
+    assert pkg_path.exists(), f"package.json missing at {pkg_path}"
+
+    pkg = json.loads(pkg_path.read_text())
+    assert "packageManager" in pkg, "package.json must pin packageManager"
+    pm = pkg["packageManager"]
+    assert pm.startswith(("npm@", "bun@")), f"unexpected packageManager: {pm}"
+
+    deps = pkg.get("dependencies", {})
+    # Exactly one lockfile pattern is implied by the packageManager choice.
+    # Copier emits only ONE of package-lock.json or bun.lock based on the answer.
+    package_manager = pm.split("@")[0]
+    assert package_manager in {"npm", "bun"}
+
+
+def test_vite_config_typescript_exists_with_correct_plugins():
+    """``vite.config.ts`` exists and contains the right Vite plugins per style."""
+    vite_path = _project_root() / "vite.config.ts"
+    assert vite_path.exists(), f"vite.config.ts missing at {vite_path}"
+
+    content = vite_path.read_text()
+    is_vue_spa = "vue()" in content and "@vitejs/plugin-vue" in content
+    is_server_rendered = "tailwindcss()" in content and "@tailwindcss/vite" in content
+    assert is_vue_spa != is_server_rendered, (
+        f"vite.config.ts must use exactly one frontend style plugin set."
+        f" Got vue()={is_vue_spa}, tailwindcss()={is_server_rendered}"
+    )
+
+
+def test_no_tailwind_config_js_file_exists():
+    """Tailwind v4 is CSS-first — there is NO tailwind.config.js file."""
+    candidates = [
+        _project_root() / "tailwind.config.js",
+        _project_root() / "tailwind.config.ts",
+        _project_root() / "tailwind.config.cjs",
+    ]
+    for path in candidates:
+        assert not path.exists(), (
+            f"tailwind.config.* must not exist (Tailwind v4 is CSS-first). "
+            f"Found: {path}"
+        )
+
+
+def test_no_inertia_django_in_pyproject():
+    """Pyproject.toml must NOT depend on inertia-django (use Django-side auth)."""
+    pyproject = _project_root() / "pyproject.toml"
+    assert pyproject.exists()
+    content = pyproject.read_text()
+    assert "inertia-django" not in content, "inertia-django is forbidden by design"
+
+
+def test_no_primevue_in_pyproject():
+    """PrimeVue / @primevue/themes are forbidden by the locked design."""
+    pyproject = _project_root() / "pyproject.toml"
+    content = pyproject.read_text()
+    assert "primevue" not in content.lower(), (
+        "PrimeVue and @primevue/themes are forbidden by the locked design"
+    )
+
+
+def test_preline_in_dependencies():
+    """Preline is the locked UI library — must be present in dependencies."""
+    pkg = json.loads((_project_root() / "package.json").read_text())
+    deps = pkg.get("dependencies", {})
+    assert "preline" in deps, "preline must be in package.json dependencies"
+
+
+def test_no_inertia_or_primevue_in_package_json():
+    """The locked design forbids both Inertia-related and PrimeVue packages."""
+    pkg = json.loads((_project_root() / "package.json").read_text())
+    all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+    forbidden = ["inertia", "primevue", "@primevue"]
+    for pkg_name in all_deps:
+        for bad in forbidden:
+            assert not pkg_name.startswith(bad), (
+                f"Forbidden npm package: {pkg_name} (locked design forbids {bad}*)"
+            )
+
+
+def test_vue_dependency_only_in_vue_spa():
+    """vue and vue-router are present only when frontend_style=vue-spa."""
+    pkg = json.loads((_project_root() / "package.json").read_text())
+    deps = pkg.get("dependencies", {})
+    has_vue = "vue" in deps and "vue-router" in deps
+    has_htmx = "htmx.org" in deps and "alpinejs" in deps
+    # Each style pulls exactly one of the two front-end stacks.
+    assert has_vue != has_htmx, (
+        f"package.json must include exactly one frontend stack: "
+        f"(vue + vue-router) for vue-spa OR (htmx.org + alpinejs) "
+        f"for server-rendered. Got has_vue={has_vue}, has_htmx={has_htmx}"
+    )

@@ -1,1 +1,16 @@
-"""Shared pytest fixtures for the generated project."""
+"""Shared pytest fixtures for the generated project.
+
+The `project_root` fixture resolves to the parent of this tests/ directory
+(useful for asserting that opt-in infra files like Dockerfile, .github/
+workflows, etc. exist or don't exist).
+"""
+
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def project_root() -> Path:
+    """Path to the rendered project root (the directory that contains manage.py)."""
+    return Path(__file__).resolve().parent.parent

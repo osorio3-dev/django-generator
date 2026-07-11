@@ -23,3 +23,14 @@ CACHES = {
         "LOCATION": "{{ project_slug }}-test",
     }
 }
+{% if 'module-realtime' in optional_modules %}
+# ---------------------------------------------------------------------------
+# Channels (module-realtime)
+# ---------------------------------------------------------------------------
+# In-memory channel layer for tests — no Redis dependency.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}
+{%- endif %}

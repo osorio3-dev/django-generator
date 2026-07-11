@@ -26,6 +26,32 @@ def _parse_bool_env(key: str, default: str = "false") -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Fernet auto-trigger
+# ---------------------------------------------------------------------------
+# Fernet activates when EITHER persists_sensitive_data=yes OR any module that
+# persists secrets/PII is selected. This keeps `cryptography` out of projects
+# that don't need encryption at rest. See DESIGN.md §7 + §12.
+_fernet_trigger_modules = {
+    "module-secure-endpoints",
+    "module-wompi",
+    "module-ghl",
+    "module-supabase",
+    "module-autologin-tests360",
+}
+_optional_modules_set = set({{ optional_modules | to_json }})
+{% if persists_sensitive_data -%}
+_fernet_user_flag = True
+{%- else -%}
+_fernet_user_flag = False
+{%- endif %}
+{%- if 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules %}
+_fernet_module_flag = True
+{%- else %}
+_fernet_module_flag = False
+{%- endif %}
+FERNET_AUTO_ACTIVATE = _fernet_user_flag or _fernet_module_flag
+
+# ---------------------------------------------------------------------------
 # Core
 # ---------------------------------------------------------------------------
 SECRET_KEY = os.environ["SECRET_KEY"]
@@ -73,19 +99,76 @@ THIRD_PARTY_APPS = [
 {%- if frontend %}
     "django_vite",
 {%- endif %}
+{%- if 'module-realtime' in optional_modules %}
+    "channels",
+{%- endif %}
+{%- if 'module-django-guard' in optional_modules %}
+    "guardian",
+{%- endif %}
 ]
 
 PROJECT_APPS = [
     "apps.core",
+{%- if 'module-secure-endpoints' in optional_modules %}
+    # Sub-apps of apps.core for module-secure-endpoints. They register the
+    # IdempotencyKey, AuditLog, and webhooks core apps.
+    "apps.core.idempotency",
+    "apps.core.audit",
+    "apps.core.webhooks",
+{%- endif %}
 {%- if admin %}
     "apps.accounts",
 {%- endif %}
 {%- if frontend %}
     "apps.web",
 {%- endif %}
+{%- if include_multitenant or 'module-multitenant' in optional_modules %}
+    "apps.tenants",
+{%- endif %}
+{%- if include_multitenant and multitenant_isolation == 'schema' %}
+    # 'apps.tenants' already added above; django_multitenant is registered
+    # separately because it's a third-party package, not a project app.
+{%- endif %}
+{%- if 'module-wompi' in optional_modules %}
+    "apps.payments",
+    "apps.payments.wompi",
+{%- endif %}
+{%- if 'module-ghl' in optional_modules or 'module-supabase' in optional_modules %}
+    "apps.integrations",
+{%- endif %}
+{%- if 'module-ghl' in optional_modules %}
+    "apps.integrations.ghl",
+{%- endif %}
+{%- if 'module-supabase' in optional_modules %}
+    "apps.integrations.supabase",
+{%- endif %}
+{%- if 'module-realtime' in optional_modules %}
+    "apps.realtime",
+{%- endif %}
+{%- if 'module-autologin-tests360' in optional_modules and admin %}
+    "apps.accounts.autologin",
+{%- endif %}
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
+{% if include_multitenant and multitenant_isolation == 'schema' %}
+INSTALLED_APPS.append("django_tenants")
+
+# django-tenants configuration. The split is:
+# - SHARED_APPS: installed in BOTH the public and tenant schemas (e.g. django-tenants itself).
+# - TENANT_APPS: installed ONLY in tenant schemas (project apps).
+TENANT_MODEL = "tenants.Tenant"
+TENANT_DOMAIN_MODEL = "tenants.Domain"
+
+# When isolation=schema, every project app becomes a TENANT_APP so it gets
+# installed into each tenant's schema. Built-in Django apps stay in
+# SHARED_APPS (they live in the public schema).
+TENANT_APPS = PROJECT_APPS[:]  # copy
+SHARED_APPS = DJANGO_APPS + THIRD_PARTY_APPS[:]
+INSTALLED_APPS = SHARED_APPS + TENANT_APPS + ["django_tenants"]
+
+DATABASE_ROUTERS = ("django_tenants.routers.TenantSyncRouter",)
+{% endif %}
 
 # ---------------------------------------------------------------------------
 # Middleware
@@ -107,6 +190,15 @@ MIDDLEWARE = [
 {%- endif %}
 {%- if frontend %}
     "django_htmx.middleware.HtmxMiddleware",
+{%- endif %}
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+    "apps.tenants.middleware.TenantMiddleware",
+{%- endif %}
+{%- if include_multitenant and multitenant_isolation == 'schema' %}
+    "apps.tenants.middleware.TenantSchemaMiddleware",
+{%- endif %}
+{%- if 'module-secure-endpoints' in optional_modules %}
+    "apps.core.idempotency.middleware.IdempotencyMiddleware",
 {%- endif %}
 ]
 
@@ -162,6 +254,9 @@ AUTH_USER_MODEL = "accounts.User"
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
+{%- if 'module-django-guard' in optional_modules %}
+    "guardian.backends.ObjectPermissionBackend",
+{%- endif %}
 ]
 
 ACCOUNT_ADAPTER = "apps.accounts.adapters.account_adapter.AccountAdapter"
@@ -171,6 +266,13 @@ ACCOUNT_EMAIL_VERIFICATION = os.environ.get("ACCOUNT_EMAIL_VERIFICATION", "manda
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 LOGIN_REDIRECT_URL = "/"
 ACCOUNT_LOGOUT_REDIRECT_URL = "/"
+{%- else %}
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+{%- if 'module-django-guard' in optional_modules %}
+    "guardian.backends.ObjectPermissionBackend",
+{%- endif %}
+]
 {%- endif %}
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -248,21 +350,75 @@ Q_CLUSTER = {
     {%- endif %}
 }
 {%- endif %}
-{% if persists_sensitive_data %}
+{% if 'module-realtime' in optional_modules %}
+# ---------------------------------------------------------------------------
+# Channels (WebSocket layer)
+# ---------------------------------------------------------------------------
+# channels-redis is the production-grade layer; LocMemChannelLayer is used in
+# local/test settings to avoid requiring Redis in dev.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [os.environ.get("REDIS_URL", "redis://localhost:6379/0")],
+        },
+    },
+}
+{% endif %}
+{% if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) %}
 # ---------------------------------------------------------------------------
 # Fernet (encryption at rest)
 # ---------------------------------------------------------------------------
-# Fernet is conditional on `persists_sensitive_data=yes` (or modules that
-# persist secrets/PII). cryptography is in the base dependencies for this reason.
+# Activated automatically by `persists_sensitive_data=yes` OR any Fernet-
+# triggering module (secure-endpoints, wompi, ghl, supabase, autologin-tests360).
+# cryptography is in the base dependencies for this reason.
 _fernet_key = os.environ.get("FERNET_ENCRYPTION_KEY")
 if not _fernet_key:
     raise ImproperlyConfigured(
-        "FERNET_ENCRYPTION_KEY is required when persists_sensitive_data=true. "
+        "FERNET_ENCRYPTION_KEY is required when encryption is active. "
         "Generate one with: "
         "python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
     )
 FERNET_ENCRYPTION_KEY = _fernet_key
 {%- endif %}
+{% if 'module-wompi' in optional_modules %}
+# ---------------------------------------------------------------------------
+# Wompi
+# ---------------------------------------------------------------------------
+WOMPI_PUBLIC_KEY = os.environ.get("WOMPI_PUBLIC_KEY", "")
+WOMPI_PRIVATE_KEY = os.environ.get("WOMPI_PRIVATE_KEY", "")
+WOMPI_EVENT_SECRET = os.environ.get("WOMPI_EVENT_SECRET", "")
+WOMPI_INTEGRITY_SECRET = os.environ.get("WOMPI_INTEGRITY_SECRET", "")
+WOMPI_REGION = os.environ.get("WOMPI_REGION", "CO")
+WOMPI_ENVIRONMENT = os.environ.get("WOMPI_ENVIRONMENT", "SANDBOX")
+{% endif %}
+{% if 'module-ghl' in optional_modules %}
+# ---------------------------------------------------------------------------
+# GHL (GoHighLevel) OAuth
+# ---------------------------------------------------------------------------
+GHL_CLIENT_ID = os.environ.get("GHL_CLIENT_ID", "")
+GHL_CLIENT_SECRET = os.environ.get("GHL_CLIENT_SECRET", "")
+GHL_REDIRECT_URI = os.environ.get("GHL_REDIRECT_URI", "")
+GHL_OAUTH_SCOPES = os.environ.get(
+    "GHL_OAUTH_SCOPES",
+    "locations.read locations.write contacts.read contacts.write",
+)
+{% endif %}
+{% if 'module-supabase' in optional_modules %}
+# ---------------------------------------------------------------------------
+# Supabase
+# ---------------------------------------------------------------------------
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+# service_role key MUST NEVER be exposed to the client. Backend-only.
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+{% endif %}
+{% if 'module-autologin-tests360' in optional_modules %}
+# ---------------------------------------------------------------------------
+# AutoLogin (tests-360 pattern)
+# ---------------------------------------------------------------------------
+AUTOLOGIN_TOKEN_TTL = int(os.environ.get("AUTOLOGIN_TOKEN_TTL", "3600"))  # seconds
+{% endif %}
 # ---------------------------------------------------------------------------
 # Logging (structlog)
 # ---------------------------------------------------------------------------

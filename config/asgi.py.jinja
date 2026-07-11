@@ -1,4 +1,10 @@
-"""ASGI configuration for async servers."""
+"""ASGI configuration for async servers.{% if 'module-realtime' in optional_modules %}
+
+When module-realtime is active, this file exposes a ProtocolTypeRouter that
+dispatches HTTP to Django's ASGI app and WebSocket to Channels routing.
+Projects that don't have module-realtime just use the plain Django app
+(unchanged from the Django 6 default).
+{% endif %}"""
 
 import os
 
@@ -7,3 +13,20 @@ from django.core.asgi import get_asgi_application
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "{{ django_settings_module }}.production")
 
 application = get_asgi_application()
+{% if 'module-realtime' in optional_modules %}
+
+
+# Channels-aware ASGI entrypoint. Activated only when module-realtime is selected.
+# For plain Django (no module-realtime), `application` above stays the WSGI/ASGI
+# app object and is enough.
+from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
+
+from apps.realtime.routing import websocket_urlpatterns  # noqa: E402
+
+application = ProtocolTypeRouter(
+    {
+        "http": get_asgi_application(),
+        "websocket": URLRouter(websocket_urlpatterns),
+    }
+)
+{%- endif %}

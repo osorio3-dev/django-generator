@@ -1,0 +1,194 @@
+{% if persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules -%}
+"""Encryption-at-rest fields backed by Fernet.
+
+This module is only generated when any Fernet trigger is active (either
+`persists_sensitive_data=yes` in copier.yml or one of the Fernet-triggering
+modules selected: secure-endpoints, wompi, ghl, supabase, autologin-tests360).
+Outside that condition the file is NOT rendered at all — see base.py.jinja's
+conditional block in base.py.jinja that sets `(persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules)`.
+
+Public API:
+- ``EncryptedCharField(max_length=...)`` — wraps Fernet around a TextField.
+  Use it for tokens, API keys, and short secrets.
+- ``EncryptedTextField()`` — same but no max_length.
+- ``EncryptedJSONField()`` — encrypts the JSON dump, stores as TextField.
+- ``EncryptedFernet`` — singleton that lazily reads the key from settings.
+
+Anti-pattern (from django-boilerplate-v2 audit): this field inherits from
+TextField, NOT CharField, because Fernet ciphertext is variable-length and
+cannot respect a column max_length. We expose `max_length` on the constructor
+as a UX hint (form widgets, validators) but it does NOT enforce a DB length.
+The docstring on each field calls this out explicitly.
+"""
+
+from __future__ import annotations
+
+import json
+from functools import cached_property
+from typing import Any
+
+from cryptography.fernet import Fernet, InvalidToken
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+from django.db import models
+
+
+class EncryptedFernet:
+    """Singleton Fernet instance.
+
+    Lazily reads ``FERNET_ENCRYPTION_KEY`` from Django settings. Raises
+    ImproperlyConfigured on access if the key is missing — never at import
+    time, so tests that mock settings can still import this module.
+    """
+
+    @cached_property
+    def instance(self) -> Fernet:
+        key = getattr(settings, "FERNET_ENCRYPTION_KEY", None)
+        if not key:
+            raise ImproperlyConfigured(
+                "FERNET_ENCRYPTION_KEY is not configured. "
+                "Generate one with: "
+                "python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+        if isinstance(key, str):
+            key = key.encode("utf-8")
+        return Fernet(key)
+
+    def encrypt(self, value: str | None) -> str:
+        """Encrypt a string. None passes through as empty string."""
+        if value in (None, ""):
+            return ""
+        return self.instance.encrypt(str(value).encode("utf-8")).decode("ascii")
+
+    def decrypt(self, value: str | None) -> str:
+        """Decrypt a string. None / empty / unparseable return empty string."""
+        if not value:
+            return ""
+        try:
+            return self.instance.decrypt(value.encode("ascii")).decode("utf-8")
+        except (InvalidToken, ValueError):
+            # Ciphertext tampered or wrong key — never raise into a query path.
+            return ""
+
+
+_fernet = EncryptedFernet()
+
+
+class EncryptedFieldMixin:
+    """Shared behaviour for encrypted fields.
+
+    Concrete fields use this mixin and define ``internal_type`` + ``to_python``.
+    """
+
+    description = "Fernet-encrypted text (no DB max_length enforced)."
+
+    def from_db_value(self, value, expression, connection):  # noqa: D401
+        """Decrypt on read from DB."""
+        if value is None:
+            return value
+        return _fernet.decrypt(value)
+
+    def to_python(self, value):
+        """Convert to plaintext Python value on assignment."""
+        if value is None:
+            return value
+        if isinstance(value, (bytes, bytearray)):
+            return _fernet.decrypt(value.decode("ascii"))
+        if isinstance(value, str) and value.startswith("gAAAAA"):
+            # Fernet ciphertext always starts with version byte 0x80 = 'gAAAAA'
+            return _fernet.decrypt(value)
+        return value
+
+    def get_prep_value(self, value):
+        """Encrypt on write to DB."""
+        if value is None or value == "":
+            return ""
+        if isinstance(value, (bytes, bytearray)):
+            return value.decode("ascii")
+        return _fernet.encrypt(str(value))
+
+
+class EncryptedCharField(EncryptedFieldMixin, models.TextField):
+    """Encrypted short text.
+
+    Anti-pattern note (django-boilerplate-v2): this field inherits from
+    TextField because Fernet ciphertext is variable-length and cannot be
+    constrained by a DB column max_length. The ``max_length`` constructor arg
+    is preserved as a UX hint (form widget sizing, validation) but does NOT
+    truncate the stored ciphertext. Do not rely on it for security — Fernet
+    itself enforces the encryption boundary.
+    """
+
+    def __init__(self, *args, max_length: int | None = None, **kwargs):
+        kwargs.setdefault("blank", True)
+        kwargs.setdefault("default", "")
+        kwargs.setdefault("editable", True)
+        self._ui_max_length = max_length  # widget hint only
+        super().__init__(*args, **kwargs)
+
+    def pre_save(self, model_instance, add):
+        """Encrypt the value before saving."""
+        value = getattr(model_instance, self.attname)
+        return self.get_prep_value(value)
+
+    def formfield(self, **kwargs):
+        """Pass max_length to the form widget as a UX hint only."""
+        defaults = {"max_length": self._ui_max_length} if self._ui_max_length else {}
+        defaults.update(kwargs)
+        return super().formfield(**defaults)
+
+
+class EncryptedTextField(EncryptedFieldMixin, models.TextField):
+    """Encrypted long text (no length hint)."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("blank", True)
+        kwargs.setdefault("default", "")
+        super().__init__(*args, **kwargs)
+
+    def pre_save(self, model_instance, add):
+        value = getattr(model_instance, self.attname)
+        return self.get_prep_value(value)
+
+
+class EncryptedJSONField(EncryptedFieldMixin, models.TextField):
+    """Encrypted JSON payload.
+
+    Stores the JSON dump as Fernet ciphertext. On read, returns the decoded
+    Python object (dict / list / etc.) just like Django's native JSONField.
+    """
+
+    def from_db_value(self, value, expression, connection):
+        if value in (None, ""):
+            return None
+        plaintext = _fernet.decrypt(value)
+        if not plaintext:
+            return None
+        return json.loads(plaintext)
+
+    def to_python(self, value):
+        if value is None:
+            return value
+        if isinstance(value, (dict, list)):
+            return value
+        if isinstance(value, str) and not value.startswith("gAAAAA"):
+            # Already plaintext JSON (e.g. set in code).
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        # Encrypted ciphertext — decrypt then parse.
+        plaintext = _fernet.decrypt(value)
+        if not plaintext:
+            return None
+        return json.loads(plaintext)
+
+    def get_prep_value(self, value):
+        if value in (None, ""):
+            return ""
+        return _fernet.encrypt(json.dumps(value, default=str))
+
+    def pre_save(self, model_instance, add):
+        value = getattr(model_instance, self.attname)
+        return self.get_prep_value(value)
+{%- endif %}

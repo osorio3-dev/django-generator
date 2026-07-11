@@ -1,0 +1,93 @@
+"""Cryptographic helpers — always available.
+
+This module lives outside any opt-in path so it's available to every project
+regardless of which modules are selected. The HMAC verifier here is the
+single source of truth; module-specific verifiers (secure-endpoints,
+module-wompi) re-export it.
+
+Always uses ``hmac.compare_digest`` for constant-time comparison. NEVER use
+plain ``==`` for any security-sensitive comparison (see django-boilerplate-v2
+audit for the anti-pattern).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+from typing import Any
+
+
+def _get_nested(payload: dict, path: str, default: str = "") -> str:
+    """Get a nested value via dot notation. Returns ``default`` on miss."""
+    current: Any = payload
+    for key in path.split("."):
+        if not isinstance(current, dict):
+            return default
+        current = current.get(key, default)
+    return str(current) if current is not None else default
+
+
+class HMAC_SHA256Verifier:
+    """Wompi-style signature verifier.
+
+    Expected payload shape::
+
+        {
+          "signature": {
+            "properties": ["data.transaction.id", "data.transaction.status"],
+            "checksum": "<hex sha256>"
+          },
+          ...rest of payload
+        }
+    """
+
+    def __init__(self, secret: str) -> None:
+        if not secret:
+            raise ValueError("HMAC_SHA256Verifier requires a non-empty secret.")
+        self._secret = secret.encode("utf-8")
+
+    def verify(self, payload: dict) -> bool:
+        """Return True iff the signature is valid for the given payload."""
+        sig = payload.get("signature")
+        if not isinstance(sig, dict):
+            return False
+        properties = sig.get("properties", [])
+        checksum = sig.get("checksum", "")
+        if not isinstance(properties, list) or not checksum:
+            return False
+
+        concatenated = "".join(_get_nested(payload, p) for p in properties)
+        expected = hmac.new(
+            self._secret,
+            concatenated.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, checksum)
+
+
+class RawHMACSHA256Verifier:
+    """Stripe/GHL-style raw-body signature verifier.
+
+    Compares ``HMAC-SHA256(secret, raw_body)`` against a header value.
+    Both arguments must be bytes for hmac.compare_digest to be constant-time.
+    """
+
+    def __init__(self, secret: str, *, algorithm: str = "sha256") -> None:
+        if not secret:
+            raise ValueError("RawHMACSHA256Verifier requires a non-empty secret.")
+        self._secret = secret.encode("utf-8")
+        algo = getattr(hashlib, algorithm, None)
+        if algo is None:
+            raise ValueError(f"Unsupported hash algorithm: {algorithm}")
+        self._algo = algo
+
+    def sign(self, body: bytes) -> str:
+        """Compute the signature for the given body bytes. Hex digest."""
+        return hmac.new(self._secret, body, self._algo).hexdigest()
+
+    def verify(self, body: bytes, signature: str) -> bool:
+        """Return True iff the signature is valid for the given body."""
+        if not signature:
+            return False
+        expected = self.sign(body)
+        return hmac.compare_digest(expected, signature)

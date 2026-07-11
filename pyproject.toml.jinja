@@ -3,7 +3,38 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["apps", "config", "apps.core", "apps.core.models", "apps.core.middleware", "apps.core.utils", "apps.core.management", "apps.core.management.commands", "apps.core.views"{% if admin %}, "apps.accounts", "apps.accounts.models", "apps.accounts.admin", "apps.accounts.adapters", "apps.accounts.migrations"{% endif %}]
+# packages list is built dynamically below — Copier Jinja resolves the conditional
+# modules to determine which apps exist in the generated project. Keep this in sync
+# with the PROJECT_APPS list in config/settings/base.py.jinja.
+{% set _packages = ["apps", "config", "apps.core", "apps.core.models", "apps.core.middleware", "apps.core.utils", "apps.core.management", "apps.core.management.commands", "apps.core.views"] -%}
+{%- if admin %}
+{%- set _packages = _packages + ["apps.accounts", "apps.accounts.models", "apps.accounts.admin", "apps.accounts.adapters", "apps.accounts.migrations"] %}
+{%- endif %}
+{%- if 'module-autologin-tests360' in optional_modules and admin %}
+{%- set _packages = _packages + ["apps.accounts.autologin", "apps.accounts.autologin.migrations"] %}
+{%- endif %}
+{%- if frontend %}
+{%- set _packages = _packages + ["apps.web"] %}
+{%- endif %}
+{%- if include_multitenant or 'module-multitenant' in optional_modules %}
+{%- set _packages = _packages + ["apps.tenants", "apps.tenants.migrations"] %}
+{%- endif %}
+{%- if 'module-wompi' in optional_modules %}
+{%- set _packages = _packages + ["apps.payments", "apps.payments.wompi", "apps.payments.wompi.migrations"] %}
+{%- endif %}
+{%- if 'module-ghl' in optional_modules or 'module-supabase' in optional_modules %}
+{%- set _packages = _packages + ["apps.integrations"] %}
+{%- endif %}
+{%- if 'module-ghl' in optional_modules %}
+{%- set _packages = _packages + ["apps.integrations.ghl", "apps.integrations.ghl.migrations"] %}
+{%- endif %}
+{%- if 'module-supabase' in optional_modules %}
+{%- set _packages = _packages + ["apps.integrations.supabase", "apps.integrations.supabase.migrations"] %}
+{%- endif %}
+{%- if 'module-realtime' in optional_modules %}
+{%- set _packages = _packages + ["apps.realtime"] %}
+{%- endif %}
+packages = {{ _packages | to_json }}
 
 [project]
 name = "{{ project_slug }}"
@@ -18,7 +49,12 @@ dependencies = [
     "gunicorn>=23.0,<24.0",
     "structlog>=25.0,<26.0",
     "django-filter>=25.1,<26.0",
+{%- if persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules %}
+    # cryptography is required by EncryptedCharField (apps.core.models.fields).
+    # Auto-installed when persists_sensitive_data=yes or any Fernet-triggering
+    # module is selected.
     "cryptography>=42,<43.0",
+{%- endif %}
 {%- if include_jobs %}
     "django-q2>=1.7,<2.0",
 {%- endif %}
@@ -35,6 +71,20 @@ dependencies = [
     "django-htmx>=1.19,<2.0",
     "django-vite>=3.0,<4.0",
 {%- endif %}
+{%- if include_multitenant and multitenant_isolation == 'schema' %}
+    "django-tenants>=3.0,<4.0",
+{%- endif %}
+{%- if 'module-realtime' in optional_modules %}
+    "channels>=4.1,<5.0",
+    "channels-redis>=4.2,<5.0",
+    "daphne>=4.1,<5.0",
+{%- endif %}
+{%- if 'module-django-guard' in optional_modules %}
+    "django-guardian>=3.0,<4.0",
+{%- endif %}
+{%- if 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules %}
+    "httpx>=0.27,<1.0",
+{%- endif %}
 ]
 
 [dependency-groups]
@@ -45,6 +95,12 @@ dev = [
     "ruff>=0.15,<1.0",
     "mypy>=1.15,<2.0",
     "django-stubs>=5.1,<6.0",
+{%- if include_debug_toolbar %}
+    "django-debug-toolbar>=4.4,<6.0",
+{%- endif %}
+{%- if 'module-realtime' in optional_modules %}
+    "pytest-asyncio>=0.24,<1.0",
+{%- endif %}
 ]
 
 [tool.ruff]

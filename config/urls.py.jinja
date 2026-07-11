@@ -26,6 +26,14 @@ urlpatterns += [
     path("accounts/", include("apps.accounts.urls")),  # noqa: F405
     path("accounts/", include("allauth.urls")),
 ]
+{%- if 'module-autologin-tests360' in optional_modules %}
+# module-autologin-tests360: GET-mutating magic-link endpoint.
+# This is the EXPLICIT opt-in exception to the GET-must-not-mutate rule.
+# It only exists when this module is selected. See autologin/views.py.
+urlpatterns += [
+    path("accounts/", include("apps.accounts.autologin.urls")),
+]
+{%- endif %}
 {%- endif %}
 {% if api %}
 # api=django-ninja

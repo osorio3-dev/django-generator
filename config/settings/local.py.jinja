@@ -25,3 +25,41 @@ CACHES = {
 # admin=unfold: relax email verification in dev so we can log in immediately.
 ACCOUNT_EMAIL_VERIFICATION = "none"  # noqa: F405
 {%- endif %}
+{% if include_debug_toolbar %}
+# ---------------------------------------------------------------------------
+# django-debug-toolbar (module-debug-toolbar — local dev only)
+# ---------------------------------------------------------------------------
+# NEVER enable in production. The toolbar is added to INSTALLED_APPS and
+# MIDDLEWARE only in local.py, not base.py, so production.py inherits a
+# clean middleware stack.
+INSTALLED_APPS += ["debug_toolbar"]  # noqa: F405
+
+MIDDLEWARE.insert(0, "debug_toolbar.middleware.DebugToolbarMiddleware")  # noqa: F405
+
+INTERNAL_IPS = ["127.0.0.1"]
+
+DEBUG_TOOLBAR_CONFIG = {
+    # HTMX-safe: toolbar still works for HTMX partial responses because the
+    # response gets the rendered HTML appended, not replaced.
+    "RENDER_PANELS": True,
+    "SHOW_TEMPLATE_CONTEXT": True,
+    "ENABLE_STACKTRACES": True,
+}
+
+def show_toolbar(request):  # noqa: F405
+    """Only show the toolbar for local requests — block it from LAN probes."""
+    return DEBUG and request.META.get("REMOTE_ADDR") in INTERNAL_IPS
+
+DEBUG_TOOLBAR_CONFIG["SHOW_TOOLBAR_CALLBACK"] = show_toolbar
+{%- endif %}
+{% if 'module-realtime' in optional_modules %}
+# ---------------------------------------------------------------------------
+# Channels (module-realtime)
+# ---------------------------------------------------------------------------
+# Use in-memory channel layer in local dev so Redis isn't required to boot.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}
+{%- endif %}

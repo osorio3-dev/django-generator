@@ -16,7 +16,7 @@ _exclude:
   - "README.md"
   - "DESIGN.md"
   - "CHANGELOG.md"
-  - "scripts/**"
+  - "scripts/validate_modules.py"
   - ".agents/atl/**"
   - ".agents/.skill-registry.cache.json"
   - ".codegraph/**"
@@ -243,9 +243,13 @@ _confirm:
 _message_after_copy: |
   Proyecto "{{ project_slug }}" generado.
 
+  Iniciá el .env con secrets random:
+    ./scripts/init_env.sh         # o python scripts/init_env.py
+    # o con --force para regenerar:  ./scripts/init_env.sh --force
+
   Próximos pasos:
     1. cd {{ project_slug }}
-    2. cp .env.example .env  (y editar SECRET_KEY, DATABASE_URL, etc.)
+    2. ./scripts/init_env.sh
     3. uv sync  (o pip install -e .)
     4. python manage.py migrate
     5. python manage.py runserver

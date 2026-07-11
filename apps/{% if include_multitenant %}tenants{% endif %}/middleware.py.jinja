@@ -1,0 +1,205 @@
+{% if multitenant_isolation == 'logical' -%}
+"""TenantMiddleware — resolves the active tenant per request.
+
+Resolution order:
+
+1. ``X-Location-ID`` header (used by integrations like Wompi webhooks and GHL).
+2. Subdomain matching against ``Site.domain`` (browser traffic).
+3. Authenticated user's ``tenant_id`` (last resort; only when auth is on).
+
+Anti-pattern avoided (django-boilerplate-v2): ``X-Tenant-ID`` alone is NEVER
+trusted. When the header is present AND the user is authenticated, the
+middleware verifies that ``user.tenant_id == tenant.id`` and rejects the
+request otherwise (403). For unauthenticated requests the tenant is bound
+but only ``public``-flagged data should be returned.
+"""
+
+from __future__ import annotations
+
+import structlog
+from django.conf import settings
+from django.http import HttpRequest, JsonResponse
+
+from apps.tenants.context import clear_current_tenant, set_current_tenant
+from apps.tenants.models import Site, Tenant
+
+logger = structlog.get_logger(__name__)
+
+
+# Paths where tenant resolution is REQUIRED (any 404 if missing).
+TENANT_AWARE_PREFIXES: tuple[str, ...] = (
+    "/api/",
+    "/integrations/",
+    "/webhooks/",
+)
+
+
+class TenantMiddleware:
+    """Bind the current Tenant to the request thread-local."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest):
+        tenant, requires_tenant = self._resolve_tenant(request)
+
+        # Tenant-aware paths MUST have a tenant.
+        if requires_tenant and tenant is None:
+            logger.warning(
+                "tenant_required_but_missing",
+                path=request.path_info,
+                headers={k: v for k, v in request.headers.items() if k.lower().startswith("x-")},
+            )
+            return JsonResponse({"detail": "Tenant required."}, status=404)
+
+        # Authn gate: when a user is logged in, their tenant must match.
+        user = getattr(request, "user", None)
+        if user is not None and getattr(user, "is_authenticated", False):
+            user_tenant_id = getattr(user, "tenant_id", None)
+            if (
+                user_tenant_id is not None
+                and tenant is not None
+                and user_tenant_id != tenant.id
+            ):
+                logger.warning(
+                    "tenant_mismatch",
+                    user_id=user.id,
+                    user_tenant_id=user_tenant_id,
+                    header_tenant_id=getattr(tenant, "id", None),
+                )
+                return JsonResponse(
+                    {"detail": "Tenant mismatch — X-Location-ID does not match the authenticated user."},
+                    status=403,
+                )
+
+        request.tenant = tenant
+        set_current_tenant(tenant)
+
+        # Bind structlog context for the duration of the request.
+        structlog.contextvars.bind_contextvars(
+            tenant_id=str(getattr(tenant, "id", "none")),
+            tenant_slug=getattr(tenant, "slug", "none"),
+        )
+
+        try:
+            response = self.get_response(request)
+        finally:
+            clear_current_tenant()
+            structlog.contextvars.clear_contextvars()
+        return response
+
+    def _resolve_tenant(self, request: HttpRequest):
+        """Return ``(tenant, requires_tenant)``.
+
+        - ``tenant`` is the resolved Tenant or None.
+        - ``requires_tenant`` is True when the request path is in
+          ``TENANT_AWARE_PREFIXES`` and a tenant is mandatory.
+        """
+        location_id = request.headers.get("X-Location-ID", "").strip()
+        requires_tenant = request.path_info.startswith(TENANT_AWARE_PREFIXES)
+
+        if location_id:
+            try:
+                return Tenant.all_objects.get(location_id=location_id, is_active=True), requires_tenant
+            except Tenant.DoesNotExist:
+                return None, requires_tenant
+
+        host = request.get_host().split(":")[0].lower()
+        if host not in {"localhost", "127.0.0.1", "0.0.0.0", ""}:
+            try:
+                site = Site.all_objects.select_related("tenant").get(domain=host)
+                if site.tenant.is_active:
+                    return site.tenant, requires_tenant
+            except Site.DoesNotExist:
+                pass
+
+        user = getattr(request, "user", None)
+        if user is not None and getattr(user, "is_authenticated", False):
+            user_tenant_id = getattr(user, "tenant_id", None)
+            if user_tenant_id is not None:
+                try:
+                    return Tenant.all_objects.get(id=user_tenant_id, is_active=True), requires_tenant
+                except Tenant.DoesNotExist:
+                    return None, requires_tenant
+
+        return None, requires_tenant
+{%- elif multitenant_isolation == 'schema' -%}
+"""TenantSchemaMiddleware — swaps the active schema per request.
+
+The middleware sets the schema on the DB connection BEFORE the request
+handler runs. ``django-tenants`` enforces that all queries for
+TenantAwareModel subclasses hit that schema.
+
+This middleware is a thin shim — the heavy lifting (per-schema routing,
+``connection.set_tenant``, ``connection.schema_name``) comes from the
+``django-tenants`` package. We import it lazily so projects that don't use
+schema isolation don't pay the import cost.
+
+Anti-pattern avoided: schema swapping MUST happen before any query. We do
+NOT rely on automatic behaviour because it doesn't apply to ad-hoc queries
+(admin, management commands, raw SQL).
+"""
+
+from __future__ import annotations
+
+from django.db import connection
+from django.http import HttpRequest, JsonResponse
+
+from apps.tenants.context import clear_current_schema, set_current_schema
+from apps.tenants.models import Tenant
+
+
+class TenantSchemaMiddleware:
+    """Bind the tenant's PostgreSQL schema to the request."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest):
+        domain = request.get_host().split(":")[0].lower()
+        tenant = self._resolve_tenant(domain)
+
+        if tenant is None:
+            return JsonResponse({"detail": "Unknown tenant."}, status=404)
+
+        # Lazy import: django-tenants only when actually routing a request.
+        try:
+            from django_tenants.utils import get_tenant_domain_model  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise ImportError(
+                "multitenant_isolation='schema' requires the 'django-tenants' package. "
+                "Add `django-tenants>=3.0,<4.0` to pyproject.toml and rerun."
+            ) from exc
+
+        # Switch the connection to the tenant schema.
+        connection.set_schema_to_public()
+        connection.set_tenant(tenant)
+
+        request.tenant = tenant
+        set_current_schema(tenant.schema_name)
+
+        try:
+            response = self.get_response(request)
+        finally:
+            connection.set_schema_to_public()
+            clear_current_schema()
+        return response
+
+    def _resolve_tenant(self, domain: str):
+        if domain in {"localhost", "127.0.0.1", "0.0.0.0"}:
+            # Local dev: use the public schema by default.
+            try:
+                return Tenant.all_objects.get(schema_name="public")
+            except Tenant.DoesNotExist:
+                return None
+        # Production: resolve via Domain rows.
+        try:
+            from django_tenants.models import Domain  # type: ignore[import-untyped]
+        except ImportError:
+            return None
+        try:
+            domain_obj = Domain.objects.select_related("tenant").get(domain=domain)
+            return domain_obj.tenant
+        except Domain.DoesNotExist:
+            return None
+{%- endif %}

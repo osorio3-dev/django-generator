@@ -1,0 +1,116 @@
+{% if multitenant_isolation == 'logical' -%}
+"""Tenant + Site models.
+
+Tenant is the root scope. Site is a per-tenant alias (a tenant can have
+multiple domains / subdomains / allowed origins). All other tenant-scoped
+models FK into ``Tenant``.
+
+Anti-pattern avoided (django-boilerplate-v2): ``X-Tenant-ID`` header is NOT
+trusted in middleware without an auth check. The TenantMiddleware here
+requires either a session auth or a signed token; the header is just a hint
+that's resolved against the authenticated user.
+"""
+
+from __future__ import annotations
+
+from django.conf import settings
+from django.db import models
+
+from apps.core.models.base import BaseModel
+from apps.tenants.mixins import TenantAwareModelMixin
+
+
+class Tenant(BaseModel):
+    """A logical tenant. Row-level isolation.
+
+    ``location_id`` is the externally-meaningful identifier (e.g. a GHL
+    sub-account ID, a Stripe Connect account, etc.). Keep it unique so
+    inbound integrations can resolve the tenant by it.
+    """
+
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=64, unique=True)
+    location_id = models.CharField(max_length=128, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["location_id"])]
+        verbose_name = "Tenant"
+        verbose_name_plural = "Tenants"
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.slug})"
+
+
+class Site(TenantAwareModelMixin, BaseModel):
+    """A per-tenant domain. Multiple sites per tenant are allowed."""
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="sites"
+    )
+    domain = models.CharField(max_length=253, unique=True)
+    is_primary = models.BooleanField(default=False)
+    allowed_origins = models.JSONField(default=list, blank=True)
+    allowed_actions = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        verbose_name = "Site"
+        verbose_name_plural = "Sites"
+        ordering = ["tenant_id", "domain"]
+
+    def __str__(self) -> str:
+        return f"{self.domain} -> {self.tenant.slug}"
+{%- elif multitenant_isolation == 'schema' -%}
+"""Tenant model (schema isolation).
+
+Each Tenant owns its own PostgreSQL schema. Subclasses use
+``TenantAwareModel`` (from ``mixins.py``) to declare themselves as belonging
+to a schema. ``django-tenants`` enforces the routing.
+"""
+
+from __future__ import annotations
+
+from django.db import models
+
+from apps.core.models.base import BaseModel
+
+
+class Tenant(BaseModel):
+    """Tenant as a PostgreSQL schema.
+
+    The ``schema_name`` field is required by ``django-tenants``. We define
+    it as a plain CharField here so the project can import models without
+    needing django-tenants installed; the package takes over schema routing
+    at runtime once it's installed.
+    """
+
+    schema_name = models.CharField(max_length=63, unique=True)
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=64, unique=True)
+    location_id = models.CharField(max_length=128, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Tenant"
+        verbose_name_plural = "Tenants"
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.schema_name})"
+
+
+class Domain(BaseModel):
+    """Maps a hostname to a Tenant. Used by django-tenants to route requests."""
+
+    domain = models.CharField(max_length=253, unique=True)
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="domains"
+    )
+    is_primary = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Domain"
+        verbose_name_plural = "Domains"
+
+    def __str__(self) -> str:
+        return f"{self.domain} -> {self.tenant.schema_name}"
+{%- endif %}

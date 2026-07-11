@@ -1,0 +1,13 @@
+"""Tenant app.
+
+Only generated when ``include_multitenant=true`` in copier.yml. The shape
+of the models, mixins, and middleware depends on ``multitenant_isolation``:
+
+- ``logical``: TenantMiddleware + TenantAwareModelMixin (single DB,
+  per-row tenant_id FK with manager-level filtering).
+- ``schema``: django-multitenant with schema-per-tenant (DB-level isolation,
+  middleware swaps the search_path on every request).
+
+Both share the same Tenant model; only the mixin + middleware differ.
+"""
+default_app_config = "apps.tenants.apps.TenantsConfig"

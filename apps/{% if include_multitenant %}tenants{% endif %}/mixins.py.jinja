@@ -1,0 +1,106 @@
+{% if multitenant_isolation == 'logical' -%}
+"""TenantAwareModelMixin — per-row tenant filtering.
+
+Subclass this mixin on any model that should be scoped to a tenant::
+
+    class Invoice(TenantAwareModelMixin, BaseModel):
+        amount = models.DecimalField(...)
+
+    Invoice.objects.create(tenant=current_tenant, amount=10)
+
+The mixin provides:
+
+- ``TenantAwareQuerySet.for_tenant(tenant)`` — explicit filter.
+- Default manager filters automatically by ``get_current_tenant()``.
+- ``all_objects`` manager bypasses the filter (admin / superuser escape hatch).
+"""
+
+from __future__ import annotations
+
+from django.db import models
+
+from apps.tenants.context import get_current_tenant
+
+
+class TenantAwareQuerySet(models.QuerySet):
+    """QuerySet that filters by the active tenant by default."""
+
+    def for_tenant(self, tenant):
+        """Explicitly filter by tenant (overrides the thread-local)."""
+        return self.filter(tenant=tenant)
+
+
+class TenantAwareManager(models.Manager):
+    """Default manager. Strict: returns empty queryset when no current_tenant.
+
+    Why empty and not "all rows": a tenant-aware model in a tenant-aware
+    request MUST always have a tenant. Returning all rows when no tenant is
+    bound would leak cross-tenant data through unprotected code paths.
+    Use ``all_objects`` for the cross-tenant escape hatch (admin / system jobs).
+    """
+
+    def get_queryset(self) -> TenantAwareQuerySet:
+        qs = TenantAwareQuerySet(self.model, using=self._db)
+        tenant = get_current_tenant()
+        if tenant is None:
+            return qs.none()
+        return qs.filter(tenant=tenant)
+
+
+class TenantGlobalManager(models.Manager):
+    """Manager that bypasses tenant filtering. Use for admin / system jobs."""
+
+    def get_queryset(self) -> TenantAwareQuerySet:
+        return TenantAwareQuerySet(self.model, using=self._db)
+
+
+class TenantAwareModelMixin(models.Model):
+    """Mixin that enforces tenant scoping.
+
+    Subclasses MUST define ``tenant`` as a ForeignKey to ``Tenant``::
+
+        class Invoice(TenantAwareModelMixin, BaseModel):
+            tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+            amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    The mixin itself defines the abstract fields and managers. Subclasses
+    inherit ``objects`` (tenant-scoped) and ``all_objects`` (global).
+    """
+
+    objects = TenantAwareManager()
+    all_objects = TenantGlobalManager()
+
+    class Meta:
+        abstract = True
+{%- elif multitenant_isolation == 'schema' -%}
+"""TenantAwareModel — schema-scoped model.
+
+Wraps ``django_tenants.models.TenantAwareModel`` when it's available.
+When the package isn't installed, falls back to a plain abstract model so
+the project can still import (and ``manage.py check`` passes); once
+django-tenants is installed, it takes over schema routing.
+"""
+
+from __future__ import annotations
+
+from django.db import models
+
+try:
+    from django_tenants.models import TenantAwareModel as _TenantAwareModel
+    _HAS_DJANGO_TENANTS = True
+except ImportError:  # pragma: no cover
+    _TenantAwareModel = models.Model
+    _HAS_DJANGO_TENANTS = False
+
+
+class TenantAwareModel(_TenantAwareModel):
+    """Schema-scoped tenant-aware model.
+
+    Subclasses must declare ``tenant`` as the FK to ``Tenant``. The
+    django-tenants machinery binds it to the current schema via
+    middleware (``TenantSchemaMiddleware``).
+    """
+
+    class Meta:
+        abstract = True
+{%- endif %}

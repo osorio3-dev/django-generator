@@ -1,0 +1,60 @@
+{% if multitenant_isolation == 'logical' -%}
+"""Thread-local tenant context.
+
+Stores the active tenant on a thread-local so model managers and middleware
+can read it without a request object. Use the public functions:
+
+- ``set_current_tenant(tenant)`` — bind for the duration of a request.
+- ``get_current_tenant()`` — read the current tenant (or None).
+- ``clear_current_tenant()`` — drop the binding.
+
+Always call ``clear_current_tenant()`` in middleware after the response so
+the thread is clean for the next request.
+"""
+
+from __future__ import annotations
+
+import threading
+
+_state = threading.local()
+
+
+def set_current_tenant(tenant) -> None:
+    """Bind ``tenant`` to the current thread."""
+    _state.tenant = tenant
+
+
+def get_current_tenant():
+    """Return the tenant bound to the current thread, or None."""
+    return getattr(_state, "tenant", None)
+
+
+def clear_current_tenant() -> None:
+    """Drop the thread-local binding."""
+    _state.tenant = None
+{%- elif multitenant_isolation == 'schema' -%}
+"""Schema-isolation tenant context.
+
+The schema name is stored on a thread-local because middleware must apply it
+to the connection before any query. The model layer uses django-multitenant
+to switch automatically.
+"""
+
+from __future__ import annotations
+
+import threading
+
+_state = threading.local()
+
+
+def set_current_schema(schema_name: str | None) -> None:
+    _state.schema_name = schema_name
+
+
+def get_current_schema() -> str | None:
+    return getattr(_state, "schema_name", None)
+
+
+def clear_current_schema() -> None:
+    _state.schema_name = None
+{%- endif %}

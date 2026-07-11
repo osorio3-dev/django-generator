@@ -1,0 +1,13 @@
+from django.apps import AppConfig
+
+
+class TenantsConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.tenants"
+    verbose_name = "Tenants"
+{% if multitenant_isolation == 'logical' %}
+
+    def ready(self):
+        """Wire the TenantMiddleware contract."""
+        from apps.tenants import context  # noqa: F401
+{%- endif %}

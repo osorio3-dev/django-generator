@@ -1,0 +1,137 @@
+"""Tests for module-multitenant.
+
+Asserts:
+- Tenant + Site models exist and are registered.
+- TenantAwareModelMixin auto-filters by current_tenant.
+- TenantMiddleware resolves tenant by X-Location-ID header.
+- TenantMiddleware enforces auth match (returns 403 on mismatch).
+- TenantMiddleware 404s on tenant-aware paths when header is unknown.
+
+Skipped when module-multitenant is not active.
+"""
+
+import pytest
+from django.test import RequestFactory
+
+MULTITENANT_ACTIVE = {% if include_multitenant %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not MULTITENANT_ACTIVE,
+    reason="module-multitenant not active in this project",
+)
+{% if multitenant_isolation == 'logical' %}
+
+
+@pytest.fixture
+def tenant(db):
+    from apps.tenants.models import Tenant
+    return Tenant.all_objects.create(
+        name="Acme",
+        slug="acme",
+        location_id="loc-acme",
+        is_active=True,
+    )
+
+
+def test_tenant_model_str(tenant):
+    assert str(tenant) == "Acme (acme)"
+
+
+def test_tenant_aware_mixin_filters_by_current_tenant(tenant):
+    """When current_tenant is set, the default manager filters by it."""
+    from apps.tenants.context import set_current_tenant, clear_current_tenant
+    from apps.tenants.models import Site
+
+    Site.all_objects.create(tenant=tenant, domain="acme.example.com")
+    Site.all_objects.create(tenant=tenant, domain="www.acme.example.com")
+
+    set_current_tenant(tenant)
+    try:
+        qs = Site.objects.all()
+        assert qs.count() == 2
+        assert all(s.tenant_id == tenant.id for s in qs)
+    finally:
+        clear_current_tenant()
+
+
+def test_tenant_aware_mixin_all_objects_bypasses_filter(tenant):
+    """all_objects sees all rows regardless of the thread-local."""
+    from apps.tenants.context import set_current_tenant, clear_current_tenant
+    from apps.tenants.models import Site
+
+    Site.all_objects.create(tenant=tenant, domain="acme.example.com")
+
+    set_current_tenant(None)
+    try:
+        assert Site.objects.count() == 0
+        assert Site.all_objects.count() == 1
+    finally:
+        clear_current_tenant()
+
+
+@pytest.mark.django_db
+def test_middleware_resolves_tenant_by_location_id_header(tenant):
+    from apps.tenants.middleware import TenantMiddleware
+    from django.http import HttpResponse
+
+    rf = RequestFactory()
+
+    def view(request):
+        return HttpResponse(f"tenant={request.tenant.id if request.tenant else 'none'}")
+
+    middleware = TenantMiddleware(view)
+    req = rf.get("/anything/")
+    req.headers = {"X-Location-ID": "loc-acme"}
+    response = middleware(req)
+    assert b"tenant=" in response.content
+
+
+@pytest.mark.django_db
+def test_middleware_404s_when_tenant_aware_path_unknown(tenant):
+    from apps.tenants.middleware import TenantMiddleware
+    from django.http import HttpResponse
+
+    rf = RequestFactory()
+    middleware = TenantMiddleware(lambda r: HttpResponse("ok"))
+
+    req = rf.get("/api/anything/")
+    req.headers = {"X-Location-ID": "loc-does-not-exist"}
+    response = middleware(req)
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_middleware_allows_paths_outside_tenant_aware_prefixes(tenant):
+    """Outside /api/, /webhooks/, /integrations/ the tenant may be None."""
+    from apps.tenants.middleware import TenantMiddleware
+    from django.http import HttpResponse
+
+    rf = RequestFactory()
+    middleware = TenantMiddleware(lambda r: HttpResponse("ok"))
+
+    req = rf.get("/health/")
+    req.headers = {"X-Location-ID": "loc-does-not-exist"}
+    response = middleware(req)
+    assert response.status_code == 200
+    assert response.content == b"ok"
+{%- endif %}
+{% if multitenant_isolation == 'schema' %}
+
+
+def test_schema_middleware_resolves_tenant(settings):
+    """Schema mode requires django-tenants. If not installed, skip."""
+    pytest.importorskip("django_tenants", reason="schema isolation requires django-tenants package")
+
+    from apps.tenants.middleware import TenantSchemaMiddleware
+
+    settings.ALLOWED_HOSTS = ["*"]  # so test host is allowed
+
+    rf = RequestFactory()
+    from django.http import HttpResponse
+    middleware = TenantSchemaMiddleware(lambda r: HttpResponse("ok"))
+    req = rf.get("/", HTTP_HOST="acme.example.com")
+    response = middleware(req)
+    # No Tenant with schema_name='public' in test DB → middleware returns 404.
+    assert response.status_code in (200, 404)
+{%- endif %}

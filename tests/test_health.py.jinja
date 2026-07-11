@@ -1,0 +1,50 @@
+"""Smoke tests for the generated project.
+
+Asserts:
+- Django boots and returns 200 on /health/
+- RateLimitMiddleware is wired into MIDDLEWARE (the django-boilerplate-v2 bug)
+"""
+
+import pytest
+from django.conf import settings
+
+
+@pytest.mark.django_db
+def test_health_endpoint_returns_ok(client):
+    """GET /health/ returns 200 with status: ok."""
+    response = client.get("/health/")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_ratelimit_middleware_is_wired():
+    """RateLimitMiddleware must be in MIDDLEWARE.
+
+    This is the bug that django-boilerplate-v2 had: the middleware class
+    existed in apps.core.middleware but was never added to MIDDLEWARE.
+    The generator wires it by default.
+    """
+    middleware = settings.MIDDLEWARE
+    assert "apps.core.middleware.ratelimit_middleware.RateLimitMiddleware" in middleware, (
+        f"RateLimitMiddleware missing from MIDDLEWARE. Got: {middleware}"
+    )
+
+
+def test_debug_default_is_false_in_base_settings(monkeypatch):
+    """DEBUG parsing must be case-insensitive and default to False.
+
+    This prevents the django-boilerplate-v2 footgun where DEBUG was parsed
+    with `== 'true'` (case-sensitive) and silently left True in production.
+    """
+    import os
+
+    monkeypatch.delenv("DEBUG", raising=False)
+    # Re-import the parser in isolation
+    from config.settings.base import _parse_bool_env
+
+    assert _parse_bool_env("DEBUG", "false") is False
+    assert _parse_bool_env("DEBUG", "true") is True
+    assert _parse_bool_env("DEBUG", "TRUE") is True
+    assert _parse_bool_env("DEBUG", "1") is True
+    assert _parse_bool_env("DEBUG", "yes") is True
+    assert _parse_bool_env("DEBUG", "no") is False

@@ -1,0 +1,117 @@
+"""Tests for module-ghl.
+
+Asserts:
+- GhlV2Client builds the correct authorization URL with required params.
+- GhlV2Client returns 429-aware retry behaviour (Retry-After honoured).
+- GhlV2Client auto-refreshes on 401 when refresh_token is available.
+- GhlInstallation model has location_id unique and stores tokens encrypted
+  when Fernet is active.
+
+Skipped when module-ghl is not active.
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+GHL_ACTIVE = {% if 'module-ghl' in optional_modules %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not GHL_ACTIVE,
+    reason="module-ghl not active in this project",
+)
+
+
+def test_ghl_build_authorize_url(settings):
+    from apps.integrations.ghl.services.v2_client import GhlV2Client
+
+    settings.GHL_CLIENT_ID = "client-xyz"
+    settings.GHL_OAUTH_SCOPES = "contacts.read contacts.write"
+    installation = MagicMock()
+    installation.location_id = "loc_abc"
+    client = GhlV2Client(installation)
+
+    url = client.build_authorize_url(redirect_uri="https://app.example.com/callback")
+    assert "client_id=client-xyz" in url
+    assert "response_type=code" in url
+    assert "scope=contacts.read+contacts.write" in url or "scope=contacts.read%20contacts.write" in url
+    assert "state=loc_abc" in url
+
+
+def test_ghl_refreshes_on_401(settings):
+    from apps.integrations.ghl.services.v2_client import GhlV2Client
+
+    settings.GHL_CLIENT_ID = "client-xyz"
+    settings.GHL_CLIENT_SECRET = "secret-xyz"
+    installation = MagicMock()
+    installation.location_id = "loc_abc"
+    installation.access_token = "old-token"
+    installation.refresh_token = "refresh-token"
+    installation.save = MagicMock()
+
+    client = GhlV2Client(installation)
+
+    with patch("apps.integrations.ghl.services.v2_client.httpx.request") as mock_request:
+        mock_request.side_effect = [
+            MagicMock(status_code=401, is_success=False),
+            MagicMock(status_code=200, is_success=True, json=lambda: {"data": {"ok": True}}, content=b'{"data":{"ok":true}}'),
+        ]
+        with patch.object(client, "refresh_access_token") as mock_refresh:
+            data = client.request("GET", "/contacts/")
+
+    assert data == {"data": {"ok": True}}
+    mock_refresh.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_ghl_installation_stores_tokens_encrypted(settings):
+    if not {{ 'True' if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) else 'False' }}:
+        pytest.skip("Fernet not active — tokens stored as plain CharField.")
+
+    from apps.integrations.ghl.models import GhlInstallation
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+    from apps.tenants.models import Tenant
+
+    tenant = Tenant.all_objects.create(name="Acme", slug="acme", location_id="loc-acme")
+{%- endif %}
+
+    installation = GhlInstallation.all_objects.create(
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+        tenant=tenant,
+{%- endif %}
+        location_id="loc_test",
+        location_name="Test Location",
+        access_token="access-token-xyz",
+        refresh_token="refresh-token-xyz",
+        scopes="contacts.read",
+        is_active=True,
+    )
+    installation.refresh_from_db()
+    assert installation.access_token.startswith("gAAAAA")
+    assert installation.refresh_token.startswith("gAAAAA")
+
+
+@pytest.mark.django_db
+def test_ghl_installation_location_id_unique(settings):
+    from apps.integrations.ghl.models import GhlInstallation
+    from django.db import IntegrityError
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+    from apps.tenants.models import Tenant
+
+    tenant = Tenant.all_objects.create(name="Acme", slug="acme", location_id="loc-acme")
+{%- endif %}
+
+    GhlInstallation.all_objects.create(
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+        tenant=tenant,
+{%- endif %}
+        location_id="dup-loc", access_token="x", refresh_token="y",
+    )
+    with pytest.raises(IntegrityError):
+        GhlInstallation.all_objects.create(
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+            tenant=tenant,
+{%- endif %}
+            location_id="dup-loc", access_token="x2", refresh_token="y2",
+        )

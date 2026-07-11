@@ -1,0 +1,30 @@
+"""GHL admin (Unfold)."""
+
+from django.contrib import admin
+from unfold.admin import ModelAdmin
+
+from apps.integrations.ghl.models import GhlInstallation, GhlWebhookEvent
+
+
+@admin.register(GhlInstallation)
+class GhlInstallationAdmin(ModelAdmin):
+    list_display = (
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+        "tenant",
+{%- endif %}
+        "location_id", "location_name", "is_active", "updated_at",
+    )
+    list_filter = ("is_active",)
+    search_fields = ("location_id", "location_name"{% if include_multitenant and multitenant_isolation == 'logical' %}, "tenant__slug"{% endif %})
+    # Anti-pattern rule: never show tokens in admin.
+    exclude = ("access_token", "refresh_token")
+
+
+@admin.register(GhlWebhookEvent)
+class GhlWebhookEventAdmin(ModelAdmin):
+    list_display = ("event_type", "location_id", "created_at")
+    list_filter = ("event_type",)
+    search_fields = ("location_id", "event_type")
+    readonly_fields = tuple(f.name for f in GhlWebhookEvent._meta.fields)
+    ordering = ("-created_at",)
+    list_per_page = 50

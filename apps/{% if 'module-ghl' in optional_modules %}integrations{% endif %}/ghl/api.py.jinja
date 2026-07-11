@@ -1,0 +1,118 @@
+"""GHL API endpoints (Django Ninja).
+
+Mounted under ``/integrations/ghl/`` when ``module-ghl`` is selected.
+Endpoints:
+
+- GET  /integrations/ghl/authorize/   — start OAuth2 flow.
+- POST /integrations/ghl/callback/    — finish OAuth2 (called by GHL).
+- GET  /integrations/ghl/contacts/    — list contacts (location-scoped).
+- POST /integrations/ghl/webhook/     — receive GHL webhook events.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from django.http import HttpRequest, JsonResponse
+from django.shortcuts import redirect
+from django.urls import reverse
+from ninja import Router
+
+from apps.integrations.ghl.models import GhlInstallation, GhlWebhookEvent
+from apps.integrations.ghl.services import GhlV2Client
+
+router = Router()
+
+
+def _resolve_installation(request: HttpRequest, location_id: str | None = None) -> GhlInstallation:
+    """Look up the GhlInstallation for the request.
+
+    Multitenant: use ``request.tenant`` first. Fall back to ``location_id``
+    from header.
+    """
+    qs = GhlInstallation.all_objects.filter(is_active=True)
+    tenant = getattr(request, "tenant", None)
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
+    loc_id = location_id or request.headers.get("X-Location-ID", "").strip()
+    if loc_id:
+        qs = qs.filter(location_id=loc_id)
+    installation = qs.first()
+    if installation is None:
+        raise ValueError("No active GHL installation for this request.")
+    return installation
+
+
+@router.get("/authorize/")
+def authorize(request: HttpRequest):
+    """Redirect the user to GHL's OAuth2 authorization page."""
+    tenant = getattr(request, "tenant", None)
+    loc_id = request.headers.get("X-Location-ID", "") or "default"
+    installation, _ = GhlInstallation.all_objects.get_or_create(
+        location_id=loc_id,
+        defaults={
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+            "tenant": tenant,
+{%- endif %}
+        } if tenant else {"name": loc_id},
+    )
+    client = GhlV2Client(installation)
+    from django.conf import settings
+
+    return redirect(client.build_authorize_url(redirect_uri=settings.GHL_REDIRECT_URI))
+
+
+@router.post("/callback/")
+def oauth_callback(request: HttpRequest):
+    """OAuth2 callback — exchange code for tokens, persist installation."""
+    code = request.POST.get("code") or (request.data or {}).get("code")
+    location_id = request.POST.get("state") or (request.data or {}).get("state")
+    if not code or not location_id:
+        return JsonResponse({"detail": "Missing code or state."}, status=400)
+
+    installation = GhlInstallation.all_objects.filter(location_id=location_id).first()
+    if installation is None:
+        return JsonResponse({"detail": "Unknown location."}, status=404)
+
+    client = GhlV2Client(installation)
+    from django.conf import settings
+
+    token_data = client.exchange_code_for_token(code, redirect_uri=settings.GHL_REDIRECT_URI)
+
+    installation.access_token = token_data["access_token"]
+    installation.refresh_token = token_data.get("refresh_token", installation.refresh_token)
+    installation.scopes = token_data.get("scope", installation.scopes)
+    installation.is_active = True
+    installation.save()
+
+    return JsonResponse({"ok": True, "location_id": location_id})
+
+
+@router.get("/contacts/")
+def list_contacts(request: HttpRequest):
+    """List contacts for the resolved installation."""
+    installation = _resolve_installation(request)
+    client = GhlV2Client(installation)
+    return client.get_contacts(limit=100)
+
+
+@router.post("/webhook/")
+def ghl_webhook(request: HttpRequest):
+    """Receive GHL webhook events. Records the payload (signature verification
+    is delegated to module-secure-endpoints' RawHMACSHA256Verifier)."""
+    import json
+
+    try:
+        payload = json.loads(request.body)
+    except (ValueError, AttributeError):
+        return JsonResponse({"detail": "Invalid JSON."}, status=400)
+
+    event_type = payload.get("type", payload.get("event", "unknown"))
+    location_id = payload.get("locationId", payload.get("location_id", ""))
+
+    GhlWebhookEvent.all_objects.create(
+        event_type=event_type,
+        location_id=location_id,
+        raw_payload=payload,
+    )
+    return JsonResponse({"ok": True})

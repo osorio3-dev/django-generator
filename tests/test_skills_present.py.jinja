@@ -1,0 +1,24 @@
+"""Generated-project agent skills must be copied.
+
+The generator owns four SKILL.md files under .agents/skills/. They are part of
+what generated projects receive, so the root .agents directory must not be
+excluded wholesale by copier.yml.
+"""
+
+from pathlib import Path
+
+
+EXPECTED_SKILLS = (
+    "django-patterns",
+    "unfold-patterns",
+    "frontend-patterns",
+    "vue-spa-patterns",
+)
+
+
+def test_generator_skills_are_present(project_root: Path):
+    skills_root = project_root / ".agents" / "skills"
+
+    for skill_name in EXPECTED_SKILLS:
+        skill_file = skills_root / skill_name / "SKILL.md"
+        assert skill_file.exists(), f"Missing generated skill: {skill_file}"

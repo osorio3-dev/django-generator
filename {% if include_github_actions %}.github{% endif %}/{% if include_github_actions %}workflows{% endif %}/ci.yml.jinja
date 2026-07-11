@@ -1,0 +1,163 @@
+{# GitHub Actions CI workflow.
+
+Jinja escapes: GitHub's ${{ ... }} syntax conflicts with Jinja. We wrap
+each "${{" block in {% raw %}...{% endraw %} to keep Jinja from parsing
+it. Project-level Jinja vars use plain {{ var }}. #}
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: {% raw %}${{ github.workflow }}-${{ github.ref }}{% endraw %}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff + ruff-format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "{{ python_version }}"
+          cache: pip
+      - name: Install ruff
+        run: pip install "ruff>=0.15,<1.0"
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format --check
+        run: ruff format --check .
+
+  type-check:
+    name: Type-check (mypy + django-stubs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "{{ python_version }}"
+          cache: pip
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: mypy
+        run: uv run mypy .
+
+  test:
+    name: Tests (pytest + django)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: {{ project_slug }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+{%- if include_jobs and jobs_backend == 'redis' or 'module-realtime' in optional_modules %}
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+{%- endif %}
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/{{ project_slug }}
+      SECRET_KEY: {% raw %}${{ secrets.SECRET_KEY_TEST || 'ci-secret-key-not-used-in-prod-xxxxxxxxxxxxxxxx' }}{% endraw %}
+      DEBUG: "false"
+      ALLOWED_HOSTS: "*"
+      DB_NAME: {{ project_slug }}
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: localhost
+      DB_PORT: "5432"
+{%- if 'module-wompi' in optional_modules %}
+      WOMPI_PUBLIC_KEY: ci_wompi_pub
+      WOMPI_PRIVATE_KEY: ci_wompi_priv
+{%- endif %}
+{%- if 'module-ghl' in optional_modules %}
+      GHL_CLIENT_ID: ci_ghl_id
+      GHL_CLIENT_SECRET: ci_ghl_secret
+{%- endif %}
+{%- if 'module-supabase' in optional_modules %}
+      SUPABASE_URL: https://ci.supabase.co
+      SUPABASE_ANON_KEY: ci_anon
+      SUPABASE_SERVICE_ROLE_KEY: ci_service
+{%- endif %}
+{%- if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) %}
+      FERNET_ENCRYPTION_KEY: {% raw %}${{ secrets.FERNET_KEY_TEST || 'ci-fernet-not-used-in-prod-xxxxxxxxxxxxxxxxxxxxx=' }}{% endraw %}
+{%- endif %}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "{{ python_version }}"
+          cache: pip
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Run migrations
+        run: uv run python manage.py migrate --noinput
+      - name: Run pytest
+        run: uv run pytest --cov --cov-report=xml
+{%- if frontend %}
+  build-frontend:
+    name: Build frontend (npm/bun + vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+{%- if package_manager == "npm" %}
+          cache: npm
+{%- else %}
+          cache: bun
+{%- endif %}
+{%- if package_manager == "npm" %}
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+{%- else %}
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.1"
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build
+        run: bun run build
+{%- endif %}
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: static/dist/
+          retention-days: 7
+{%- endif %}

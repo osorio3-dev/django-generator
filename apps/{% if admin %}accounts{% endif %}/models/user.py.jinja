@@ -18,6 +18,16 @@ class User(AbstractUser, BaseModel):
     email = models.EmailField(unique=True)
     display_name = models.CharField(max_length=150, blank=True, default="")
     avatar = models.URLField(blank=True, default="")
+{% if 'module-django-guard' in optional_modules %}
+    # django-guardian: link object-level permissions to this User.
+    # The reverse relation lets you do user.object_permissions.filter(...).
+    object_permissions = models.ManyToManyField(
+        "auth.Permission",
+        blank=True,
+        related_name="object_users",
+        help_text="Object-level permissions granted to this user (django-guardian).",
+    )
+{%- endif %}
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []

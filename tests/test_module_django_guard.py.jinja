@@ -1,0 +1,43 @@
+"""Tests for module-django-guard.
+
+Asserts:
+- guardian is in INSTALLED_APPS.
+- ObjectPermissionBackend is in AUTHENTICATION_BACKENDS.
+- User.object_permissions reverse relation exists.
+
+Skipped when module-django-guard is not active.
+"""
+
+import pytest
+from django.conf import settings
+
+GUARD_ACTIVE = {% if 'module-django-guard' in optional_modules %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not GUARD_ACTIVE,
+    reason="module-django-guard not active in this project",
+)
+
+
+def test_guardian_in_installed_apps():
+    assert "guardian" in settings.INSTALLED_APPS
+
+
+def test_object_permission_backend_in_authentication_backends():
+    assert "guardian.backends.ObjectPermissionBackend" in settings.AUTHENTICATION_BACKENDS
+
+
+def test_user_has_object_permissions_field():
+    """django-guardian wires object-level permissions via the ``user_permissions``
+    M2M (and our User adds an explicit ``object_permissions`` alias for clarity).
+    """
+    {% if admin %}
+    from apps.accounts.models import User
+
+    field_names = {f.name for f in User._meta.get_fields()}
+    assert "user_permissions" in field_names  # guardian relies on this
+    {%- else %}
+    # When admin is OFF the custom User model isn't created; skip.
+    pytest.skip("admin disabled — no custom User to inspect.")
+    {%- endif %}

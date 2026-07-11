@@ -1,0 +1,11 @@
+"""Realtime app — Channels consumers for WebSockets.
+
+Only generated when ``module-realtime`` is selected. Provides:
+
+- ``BaseConsumer`` — JSON-friendly consumer that echoes messages for now.
+- ``routing.websocket_urlpatterns`` — registered in ``config/asgi.py``.
+
+Add new consumers by subclassing ``BaseConsumer`` and adding the route.
+"""
+
+default_app_config = "apps.realtime.apps.RealtimeConfig"

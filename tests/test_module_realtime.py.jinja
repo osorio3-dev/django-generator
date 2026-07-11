@@ -1,0 +1,59 @@
+"""Tests for module-realtime.
+
+Asserts:
+- The Channels routing module exists and exposes websocket_urlpatterns.
+- BaseConsumer handles a ping action and echoes the payload.
+- BaseConsumer returns an error for unknown actions.
+
+Skipped when module-realtime is not active.
+"""
+
+import pytest
+
+REALTIME_ACTIVE = {% if 'module-realtime' in optional_modules %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not REALTIME_ACTIVE,
+    reason="module-realtime not active in this project",
+)
+
+
+def test_websocket_urlpatterns_exists():
+    from apps.realtime.routing import websocket_urlpatterns
+
+    assert isinstance(websocket_urlpatterns, list)
+    assert len(websocket_urlpatterns) >= 1
+
+
+@pytest.mark.asyncio
+async def test_base_consumer_handles_ping():
+    """Echo test: send ping, expect 'pong' back."""
+    from apps.realtime.consumers import BaseConsumer
+
+    consumer = BaseConsumer()
+    # Stub the channel layer.
+    sent: list[dict] = []
+
+    async def fake_send_json(content):
+        sent.append(content)
+
+    consumer.send_json = fake_send_json  # type: ignore[assignment]
+    await consumer.receive_json({"action": "ping", "payload": {"x": 1}, "request_id": "r1"})
+    assert sent == [{"action": "ping", "result": {"pong": True, "echo": {"x": 1}}, "request_id": "r1"}]
+
+
+@pytest.mark.asyncio
+async def test_base_consumer_unknown_action_returns_error():
+    from apps.realtime.consumers import BaseConsumer
+
+    consumer = BaseConsumer()
+    sent: list[dict] = []
+
+    async def fake_send_json(content):
+        sent.append(content)
+
+    consumer.send_json = fake_send_json  # type: ignore[assignment]
+    await consumer.receive_json({"action": "explode", "payload": {}, "request_id": "r2"})
+    assert sent and "error" in sent[0]
+    assert "explode" in sent[0]["error"]

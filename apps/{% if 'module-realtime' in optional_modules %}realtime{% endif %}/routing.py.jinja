@@ -1,0 +1,13 @@
+"""WebSocket URL patterns for the realtime app.
+
+Mounted by ``config/asgi.py`` via ``URLRouter(websocket_urlpatterns)``.
+Add new consumers here.
+"""
+
+from django.urls import re_path
+
+from apps.realtime.consumers import BaseConsumer
+
+websocket_urlpatterns = [
+    re_path(r"ws/echo/$", BaseConsumer.as_asgi()),
+]

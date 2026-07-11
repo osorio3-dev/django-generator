@@ -1,0 +1,73 @@
+"""WebSocket consumers for the realtime app.
+
+BaseConsumer handles JSON-encoded text frames: it expects ``{"action": "...",
+"payload": {...}}`` and responds with ``{"action": "...", "result": ...}``.
+Subclasses override ``handle_*`` methods.
+
+To add a new channel::
+
+    class MyConsumer(BaseConsumer):
+        async def handle_ping(self, payload):
+            return {"pong": True}
+
+    # in routing.py:
+    re_path(r"ws/my/$", MyConsumer.as_asgi()),
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from channels.generic.websocket import AsyncJsonWebsocketConsumer
+
+
+class BaseConsumer(AsyncJsonWebsocketConsumer):
+    """JSON-friendly async consumer.
+
+    Frames::
+
+        → {"action": "ping", "payload": {...}}
+        ← {"action": "ping", "result": {...}, "request_id": "..."}
+    """
+
+    async def connect(self):
+        """Accept all connections by default. Override to add auth checks."""
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        """No-op by default."""
+        pass
+
+    async def receive_json(self, content: dict[str, Any], **kwargs):
+        """Dispatch to ``handle_<action>`` based on the action key."""
+        action = content.get("action")
+        payload = content.get("payload") or {}
+        request_id = content.get("request_id")
+        handler = getattr(self, f"handle_{action}", None)
+        if handler is None:
+            await self.send_json(
+                {
+                    "action": action,
+                    "error": f"unknown action: {action!r}",
+                    "request_id": request_id,
+                }
+            )
+            return
+        try:
+            result = await handler(payload)
+            await self.send_json({"action": action, "result": result, "request_id": request_id})
+        except Exception as exc:  # noqa: BLE001
+            await self.send_json(
+                {
+                    "action": action,
+                    "error": str(exc),
+                    "request_id": request_id,
+                }
+            )
+
+    # ── Default handlers (override in subclasses) ─────────────────────────
+
+    async def handle_ping(self, payload: dict) -> dict:
+        """Default no-op handler. Useful for keep-alive frames."""
+        return {"pong": True, "echo": payload}

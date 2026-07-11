@@ -6,7 +6,7 @@
   <meta name="description" content="{% raw %}{% block meta_description %}{{ project_name }}{% endblock %}{% endraw %}">
   <title>{% raw %}{% block title %}{% endraw %}{{ project_name }}{% raw %}{% endblock %}{% endraw %}</title>
   {% raw %}{% vite_hmr_client %}{% endraw %}
-  {% raw %}{% vite_asset 'static/js/main.js' %}{% endraw %}
+  {% raw %}{% vite_asset 'apps/web/vite/entry.js' %}{% endraw %}
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   {% raw %}{% block extra_head %}{% endblock %}{% endraw %}
 </head>

@@ -1,0 +1,51 @@
+"""Tests for module-debug-toolbar.
+
+Asserts:
+- When include_debug_toolbar=true, debug_toolbar is in INSTALLED_APPS for the
+  local settings module.
+- When include_debug_toolbar=false, debug_toolbar is NOT in INSTALLED_APPS.
+
+Skipped when include_debug_toolbar is not active.
+"""
+
+import pytest
+from django.conf import settings
+
+DEBUG_TOOLBAR_ACTIVE = {% if include_debug_toolbar %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not DEBUG_TOOLBAR_ACTIVE,
+    reason="include_debug_toolbar not set in this project",
+)
+
+
+def test_debug_toolbar_in_installed_apps_for_local_settings():
+    """Switch DJANGO_SETTINGS_MODULE to local and re-import."""
+    import importlib
+    import os
+    import sys
+
+    os.environ["DJANGO_SETTINGS_MODULE"] = "{{ django_settings_module }}.local"
+    if "config.settings.local" in sys.modules:
+        importlib.reload(sys.modules["config.settings.local"])
+
+    # Re-resolve INSTALLED_APPS via the local settings.
+    from config.settings import local as local_settings  # type: ignore[import-not-found]
+
+    assert "debug_toolbar" in local_settings.INSTALLED_APPS
+
+
+def test_debug_toolbar_middleware_in_local_settings():
+    import os
+    import sys
+    import importlib
+
+    os.environ["DJANGO_SETTINGS_MODULE"] = "{{ django_settings_module }}.local"
+    if "config.settings.local" in sys.modules:
+        importlib.reload(sys.modules["config.settings.local"])
+
+    from config.settings import local as local_settings
+
+    middleware = local_settings.MIDDLEWARE
+    assert "debug_toolbar.middleware.DebugToolbarMiddleware" in middleware

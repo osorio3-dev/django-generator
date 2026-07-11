@@ -2,8 +2,9 @@
 
 from django.urls import path
 
-from apps.accounts.autologin.views import autologin
+from apps.accounts.autologin.views import autologin, autologin_confirm
 
 urlpatterns = [
-    path("autologin/<str:token>/", autologin, name="autologin"),
+    path("autologin/<str:token>/", autologin_confirm, name="autologin-confirm"),
+    path("autologin/<str:token>/redeem/", autologin, name="autologin"),
 ]

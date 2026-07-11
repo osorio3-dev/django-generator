@@ -2,11 +2,9 @@
 
 Issues and redeems magic-link tokens.
 
-SECURITY NOTE: this module exposes a GET endpoint that mutates state
-(creates a session). That is the EXPLICIT exception noted in DESIGN.md §13
-and §15. It is opt-in via ``module-autologin-tests360`` and ONLY available
-when that module is selected. Without the module active the URL does not
-exist.
+SECURITY NOTE: the token redemption endpoint is POST-only. The optional GET
+confirmation page renders a CSRF-protected form and may auto-submit it for
+zero-click UX, but GET never creates a session.
 
 The view requires:
 - A valid signed token in the URL (HMAC-SHA256 over ``user_id + expires_at``).
@@ -24,9 +22,11 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import login
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
+from django.middleware.csrf import get_token
+from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt
+from django.utils.html import escape
 from django.views.decorators.http import require_http_methods
 
 from apps.accounts.autologin.models import AutoLoginToken, AutoLoginUsage
@@ -78,12 +78,35 @@ def _record_usage(request, *, user_id: int | None, token_hash: str, outcome: str
     )
 
 
-@require_http_methods(["GET", "POST"])
-@csrf_exempt
+@require_http_methods(["GET"])
+def autologin_confirm(request, token: str):
+    """Render a CSRF-protected confirmation form for zero-click magic links."""
+    action = reverse("autologin", args=[token])
+    csrf_token = get_token(request)
+    return HttpResponse(
+        f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signing you in...</title>
+</head>
+<body>
+  <form id="autologin-form" method="post" action="{escape(action)}">
+    <input type="hidden" name="csrfmiddlewaretoken" value="{escape(csrf_token)}">
+    <button type="submit">Continue</button>
+  </form>
+  <script>
+    setTimeout(() => document.getElementById('autologin-form').submit(), 0);
+  </script>
+</body>
+</html>"""
+    )
+
+
+@require_http_methods(["POST"])
 def autologin(request, token: str):
     """Redeem a magic-link token and start a session.
-
-    SECURITY: This view mutates state via GET. See module docstring.
 
     Token shape: ``<plaintext>`` (32 url-safe characters). We hash it and
     look up ``AutoLoginToken`` by hash. The plaintext is never stored.

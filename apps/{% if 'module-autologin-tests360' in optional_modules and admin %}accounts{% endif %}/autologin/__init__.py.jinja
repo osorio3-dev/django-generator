@@ -1,16 +1,15 @@
 """AutoLogin — magic-link tokens for the tests-360 pattern.
 
-ONLY generated when ``module-autologin-tests360`` is selected. This module
-is the EXPLICIT EXCEPTION to the rule "GET must not mutate state": the
-tests-360 product uses GET-able magic links for passwordless login from
-emails and chat tools that strip POST bodies.
+ONLY generated when ``module-autologin-tests360`` is selected. Token redemption
+is POST-only; optional GET confirmation pages render CSRF-protected forms and
+never create sessions directly.
 
 The token endpoint REQUIRES a valid signed token in the URL; without it
 the view 404s. Without the module active, no such endpoint exists at all.
 
-Anti-pattern avoided (inpacto-ghl-integrations audit): the original tests-360
-exposed a GET endpoint that auto-logged in WITHOUT a token. Here we
-require the signed token AND mark it used atomically.
+Anti-pattern avoided (inpacto-ghl-integrations audit): GET requests never
+start a session. POST redemption requires the signed token and marks it used
+atomically.
 """
 
 default_app_config = "apps.accounts.autologin.apps.AutoLoginConfig"

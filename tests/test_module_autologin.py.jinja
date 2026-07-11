@@ -47,7 +47,7 @@ def test_issue_and_redeem_token(user):
 
     client = Client()
     url = reverse("autologin", args=[plaintext])
-    response = client.get(url)
+    response = client.post(url)
     assert response.status_code == 302  # redirect after login
     assert response.url == "/"
 
@@ -66,10 +66,10 @@ def test_token_cannot_be_reused(user):
     client = Client()
     url = reverse("autologin", args=[plaintext])
 
-    first = client.get(url)
+    first = client.post(url)
     assert first.status_code == 302
 
-    second = client.get(url)
+    second = client.post(url)
     assert second.status_code == 302
     assert "autologin=used" in second.url
 
@@ -78,7 +78,7 @@ def test_token_cannot_be_reused(user):
 def test_unknown_token_returns_invalid():
     client = Client()
     url = reverse("autologin", args=["completely-bogus-token-zzz"])
-    response = client.get(url)
+    response = client.post(url)
     assert response.status_code == 302
     assert "autologin=invalid" in response.url
 
@@ -98,7 +98,7 @@ def test_expired_token_returns_expired(user, settings):
 
     client = Client()
     url = reverse("autologin", args=[plaintext])
-    response = client.get(url)
+    response = client.post(url)
     assert response.status_code == 302
     assert "autologin=expired" in response.url
 

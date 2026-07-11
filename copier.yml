@@ -115,6 +115,15 @@ package_manager:
   when: "{{ frontend }}"
   help: "Lockfile a generar. NUNCA ambos: si 'bun' se omite package-lock.json, y viceversa."
 
+vue_router:
+  type: str
+  default: "history"
+  choices:
+    - "history"
+    - "hash"
+  when: "{{ frontend and frontend_style == 'vue-spa' }}"
+  help: "Vue Router mode. 'history' = URLs limpias (/about). 'hash' = URLs con # (/about)."
+
 # -----------------------------------------------------------------------------
 # Fernet trigger
 # -----------------------------------------------------------------------------

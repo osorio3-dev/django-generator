@@ -1,0 +1,47 @@
+import { defineConfig } from 'vite';
+{% if frontend_style == 'vue-spa' -%}
+import vue from '@vitejs/plugin-vue';
+{%- else -%}
+import tailwindcss from '@tailwindcss/vite';
+{%- endif %}
+import { resolve } from 'path';
+
+export default defineConfig({
+  {% if frontend_style == 'vue-spa' -%}
+  plugins: [vue()],
+  {%- else -%}
+  plugins: [tailwindcss()],
+  {%- endif %}
+  resolve: {
+    alias: {
+      {% if frontend_style == 'vue-spa' -%}
+      '@': resolve(__dirname, './apps/web/vite'),
+      {%- else -%}
+      '@': resolve(__dirname, './static'),
+      {%- endif %}
+    },
+  },
+  build: {
+    // Pin manifest filename so it lives at static/dist/manifest.json
+    // (matches django-vite config in base.py). Vite 6 default would put it
+    // under static/dist/.vite/manifest.json.
+    manifest: 'manifest.json',
+    outDir: 'static/dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      input: resolve(
+        __dirname,
+        {% if frontend_style == 'vue-spa' -%}
+        'apps/web/vite/entry.js',
+        {%- else -%}
+        'static/js/main.js',
+        {%- endif %}
+      ),
+    },
+  },
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
+  },
+});

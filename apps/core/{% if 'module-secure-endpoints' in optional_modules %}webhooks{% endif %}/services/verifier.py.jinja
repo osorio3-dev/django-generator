@@ -1,0 +1,14 @@
+"""HMAC webhook signature verification.
+
+Re-exports the always-available crypto helpers from ``apps.core.utils.crypto``
+so that secure-endpoints users can import them from the canonical
+``apps.core.webhooks.services.verifier`` location.
+
+This module is only generated when module-secure-endpoints is selected,
+but the underlying helpers are available everywhere via
+``apps.core.utils.crypto``.
+"""
+
+from apps.core.utils.crypto import HMAC_SHA256Verifier, RawHMACSHA256Verifier
+
+__all__ = ["HMAC_SHA256Verifier", "RawHMACSHA256Verifier"]

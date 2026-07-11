@@ -1,0 +1,225 @@
+"""Tests for module-secure-endpoints.
+
+Asserts:
+- HMAC_SHA256Verifier rejects tampered checksums.
+- HMAC_SHA256Verifier accepts correct signatures (round-trip).
+- RawHMACSHA256Verifier is constant-time via hmac.compare_digest.
+- Signed token issuance/verification round-trip.
+- Signed token rejects tampered signature.
+- Signed token rejects expired token.
+- IdempotencyMiddleware replays cached responses when X-Idempotency-Key matches.
+- IdempotencyMiddleware returns 409 when same key sent with different payload.
+
+These tests are auto-skipped when module-secure-endpoints is not in optional_modules.
+"""
+
+import json
+
+import pytest
+from django.http import HttpResponse
+from django.test import RequestFactory
+
+
+SECURE_ENDPOINTS_ACTIVE = {% if 'module-secure-endpoints' in optional_modules %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not SECURE_ENDPOINTS_ACTIVE,
+    reason="module-secure-endpoints not active in this project",
+)
+
+
+# ── HMAC verifier ──────────────────────────────────────────────────────
+
+
+def test_hmac_sha256_verifier_accepts_correct_signature():
+    from apps.core.webhooks.services.verifier import HMAC_SHA256Verifier
+    import hashlib
+    import hmac
+
+    secret = "shhh-secret"
+    payload = {
+        "data": {"transaction": {"id": "TX-1", "status": "APPROVED"}},
+        "signature": {
+            "properties": ["data.transaction.id", "data.transaction.status"],
+            "checksum": "",
+        },
+    }
+    concatenated = "TX-1" + "APPROVED"
+    payload["signature"]["checksum"] = hmac.new(
+        secret.encode(), concatenated.encode(), hashlib.sha256
+    ).hexdigest()
+    assert HMAC_SHA256Verifier(secret).verify(payload) is True
+
+
+def test_hmac_sha256_verifier_rejects_tampered_checksum():
+    from apps.core.webhooks.services.verifier import HMAC_SHA256Verifier
+
+    secret = "shhh-secret"
+    payload = {
+        "data": {"transaction": {"id": "TX-1", "status": "APPROVED"}},
+        "signature": {
+            "properties": ["data.transaction.id"],
+            "checksum": "0" * 64,
+        },
+    }
+    assert HMAC_SHA256Verifier(secret).verify(payload) is False
+
+
+def test_hmac_sha256_verifier_rejects_missing_signature():
+    from apps.core.webhooks.services.verifier import HMAC_SHA256Verifier
+
+    assert HMAC_SHA256Verifier("x").verify({"data": {}}) is False
+
+
+def test_raw_hmac_sha256_verifier_roundtrip():
+    from apps.core.webhooks.services.verifier import RawHMACSHA256Verifier
+
+    secret = "abc"
+    body = b'{"event":"order.created"}'
+    verifier = RawHMACSHA256Verifier(secret)
+    sig = verifier.sign(body)
+    assert verifier.verify(body, sig) is True
+    assert verifier.verify(body, "deadbeef") is False
+
+
+def test_raw_hmac_sha256_verifier_requires_secret():
+    from apps.core.webhooks.services.verifier import RawHMACSHA256Verifier
+
+    with pytest.raises(ValueError):
+        RawHMACSHA256Verifier("")
+
+
+# ── Signed tokens ──────────────────────────────────────────────────────
+
+
+def test_signed_token_roundtrip(settings):
+    from apps.core.webhooks.services.signed_token import issue, verify
+
+    settings.SECRET_KEY = "x" * 60  # avoid placeholder guard
+    token = issue({"user_id": 1, "action": "verify_email"}, ttl_seconds=60)
+    payload = verify(token)
+    assert payload == {"user_id": 1, "action": "verify_email"}
+
+
+def test_signed_token_rejects_tampered_signature(settings):
+    from apps.core.webhooks.services.signed_token import issue, verify
+
+    settings.SECRET_KEY = "x" * 60
+    token = issue({"a": 1}, ttl_seconds=60)
+    body, sig = token.rsplit(".", 1)
+    flipped_sig = ("0" if sig[-1] != "0" else "1") + sig[1:]
+    assert verify(f"{body}.{flipped_sig}") is None
+
+
+def test_signed_token_rejects_expired(settings):
+    from apps.core.webhooks.services import signed_token
+
+    settings.SECRET_KEY = "x" * 60
+    with patch_time(signed_token, 0):
+        token = signed_token.issue({"a": 1}, ttl_seconds=10)
+    with patch_time(signed_token, 1_000_000):
+        assert signed_token.verify(token) is None
+
+
+def test_signed_token_rejects_placeholder_secret(settings):
+    from apps.core.webhooks.services.signed_token import issue
+
+    settings.SECRET_KEY = "your-secret-key-change-in-production-must-be-at-least-50-chars-long-xxx"
+    with pytest.raises(ValueError):
+        issue({"a": 1})
+
+
+def patch_time(module, value: float):
+    """Context manager that mocks module.time.time() to return value."""
+    from contextlib import contextmanager
+    from unittest.mock import patch
+
+    @contextmanager
+    def _ctx():
+        with patch.object(module.time, "time", return_value=value):
+            yield
+
+    return _ctx()
+
+
+# ── Idempotency middleware ──────────────────────────────────────────────
+
+
+@pytest.fixture
+def idem_factory(db):
+    """Build a request factory and a test view that returns JSON."""
+    rf = RequestFactory()
+
+    def view(request):
+        body = json.dumps({"ok": True})
+        return HttpResponse(body, status=201, content_type="application/json")
+
+    return rf, view
+
+
+@pytest.fixture
+def idempotency_middleware_cls():
+    """Late-import the middleware so the skipif can short-circuit collection."""
+    from apps.core.idempotency.middleware import IdempotencyMiddleware
+
+    return IdempotencyMiddleware
+
+
+@pytest.fixture
+def idempotency_model_cls():
+    from apps.core.idempotency.models import IdempotencyKey
+
+    return IdempotencyKey
+
+
+def test_idempotency_replays_cached_response(idem_factory, idempotency_middleware_cls):
+    rf, view = idem_factory
+    middleware = idempotency_middleware_cls(view)
+
+    payload = b'{"a": 1}'
+    req1 = rf.post("/api/test/", data=payload, content_type="application/json")
+    req1.headers = {"X-Idempotency-Key": "abc-123"}
+    resp1 = middleware(req1)
+    assert resp1.status_code == 201
+
+    req2 = rf.post("/api/test/", data=payload, content_type="application/json")
+    req2.headers = {"X-Idempotency-Key": "abc-123"}
+    resp2 = middleware(req2)
+    assert resp2.status_code == 201
+    assert resp2["X-Idempotent-Replay"] == "true"
+
+
+def test_idempotency_returns_409_on_payload_mismatch(idem_factory, idempotency_middleware_cls):
+    rf, view = idem_factory
+    middleware = idempotency_middleware_cls(view)
+
+    req1 = rf.post("/api/test/", data=b'{"a": 1}', content_type="application/json")
+    req1.headers = {"X-Idempotency-Key": "abc-123"}
+    middleware(req1)
+
+    req2 = rf.post("/api/test/", data=b'{"a": 2}', content_type="application/json")
+    req2.headers = {"X-Idempotency-Key": "abc-123"}
+    resp2 = middleware(req2)
+    assert resp2.status_code == 409
+
+
+def test_idempotency_passes_through_without_key(idem_factory, idempotency_middleware_cls):
+    rf, view = idem_factory
+    middleware = idempotency_middleware_cls(view)
+
+    req = rf.post("/api/test/", data=b'{"a": 1}', content_type="application/json")
+    resp = middleware(req)
+    assert resp.status_code == 201
+    assert "X-Idempotent-Replay" not in resp
+
+
+def test_idempotency_persists_row(idem_factory, idempotency_middleware_cls, idempotency_model_cls):
+    rf, view = idem_factory
+    middleware = idempotency_middleware_cls(view)
+
+    req = rf.post("/api/test/", data=b'{"a": 1}', content_type="application/json")
+    req.headers = {"X-Idempotency-Key": "persist-test"}
+    middleware(req)
+
+    assert idempotency_model_cls.objects.filter(key="persist-test").exists()

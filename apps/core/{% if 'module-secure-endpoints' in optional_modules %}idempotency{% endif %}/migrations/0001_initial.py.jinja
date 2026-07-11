@@ -1,0 +1,40 @@
+"""Initial migration for the idempotency app."""
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = []
+
+    operations = [
+        migrations.CreateModel(
+            name="IdempotencyKey",
+            fields=[
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("deleted_at", models.DateTimeField(blank=True, editable=False, null=True)),
+                ("tenant_id", models.BigIntegerField(blank=True, db_index=True, null=True)),
+                ("key", models.CharField(max_length=255)),
+                ("payload_hash", models.CharField(max_length=64)),
+                ("response_status", models.PositiveSmallIntegerField()),
+                ("response_content_type", models.CharField(blank=True, default="", max_length=128)),
+                ("response_body", models.TextField(blank=True, default="")),
+            ],
+            options={
+                "verbose_name": "Idempotency key",
+                "verbose_name_plural": "Idempotency keys",
+            },
+        ),
+        migrations.AlterUniqueTogether(
+            name="idempotencykey",
+            unique_together={("tenant_id", "key")},
+        ),
+        migrations.AddIndex(
+            model_name="idempotencykey",
+            index=models.Index(fields=["created_at"], name="idem_idemp_created_idx"),
+        ),
+    ]

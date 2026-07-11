@@ -1,0 +1,18 @@
+"""Webhooks app — re-exports the HMAC verifiers and signed-token services.
+
+These services are available regardless of whether specific provider modules
+(wompi, ghl, supabase) are active, because they're the canonical HMAC
+implementation that those modules build on top of.
+"""
+from apps.core.webhooks.services.verifier import (
+    HMAC_SHA256Verifier,
+    RawHMACSHA256Verifier,
+)
+from apps.core.webhooks.services.signed_token import issue, verify
+
+__all__ = [
+    "HMAC_SHA256Verifier",
+    "RawHMACSHA256Verifier",
+    "issue",
+    "verify",
+]

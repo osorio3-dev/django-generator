@@ -1,0 +1,4 @@
+"""Webhooks app — re-exports the shared HMAC verifier services."""
+from apps.core.webhooks.services import HMAC_SHA256Verifier, RawHMACSHA256Verifier, issue, verify  # noqa: F401
+
+default_app_config = "apps.core.webhooks.apps.WebhooksConfig"

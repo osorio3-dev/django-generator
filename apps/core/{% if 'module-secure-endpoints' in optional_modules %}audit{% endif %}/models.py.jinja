@@ -1,0 +1,58 @@
+"""Audit log model + signal wiring.
+
+A model is audited automatically when its class declares ``audited = True``
+in its Meta. The ``post_save`` and ``post_delete`` signals on the
+apps.core.utils.audit.AuditEmitter dispatch to a single ``AuditLog`` row.
+
+Usage in any project app::
+
+    from apps.core.audit.signals import register_audit_signals
+
+    class Invoice(BaseModel):
+        ...
+        class Meta:
+            audited = True  # enables automatic auditing
+            ...
+
+    # In apps.py.ready():
+    register_audit_signals(Invoice)
+"""
+
+from __future__ import annotations
+
+from django.db import models
+
+from apps.core.models.base import BaseModel
+
+
+class AuditLog(BaseModel):
+    """Immutable record of a state change on an audited model.
+
+    Rows are append-only — never updated, never deleted. Soft-delete on
+    BaseModel is bypassed here because audit history must survive the deletion
+    of the originating record.
+    """
+
+    actor_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    action = models.CharField(max_length=16)  # created | updated | deleted
+    entity_type = models.CharField(max_length=128, db_index=True)
+    entity_id = models.CharField(max_length=64, db_index=True)
+    payload_hash = models.CharField(max_length=64)  # SHA256 of the serialized payload
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["entity_type", "entity_id"]),
+            models.Index(fields=["created_at"]),
+        ]
+        ordering = ["-created_at"]
+        verbose_name = "Audit log"
+        verbose_name_plural = "Audit logs"
+
+    def __str__(self) -> str:
+        return f"{self.action} {self.entity_type}#{self.entity_id} @ {self.created_at:%Y-%m-%dT%H:%M:%S}"
+
+    def delete(self, *args, **kwargs):  # noqa: D401
+        """AuditLog is immutable. Refuse hard deletes."""
+        raise RuntimeError("AuditLog rows are append-only and cannot be deleted.")

@@ -1,0 +1,93 @@
+"""Signal-driven audit log emission.
+
+Audited models (``class Meta: audited = True``) get post_save and post_delete
+hooks. The hooks write a single AuditLog row per state change with the
+serialized payload hash and actor IP.
+
+Connect at app-ready time:
+
+    from apps.core.audit.signals import register_audit_signals
+
+    class MyAppConfig(AppConfig):
+        def ready(self):
+            from apps.myapp.models import Invoice
+            register_audit_signals(Invoice)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
+
+from apps.core.audit.models import AuditLog
+
+
+def _serialize_payload(instance) -> str:
+    """Return a JSON string of the instance's __dict__. Used to compute payload_hash.
+
+    Excludes ``_state`` (Django internal) and pk-related private attributes.
+    """
+    data = {k: v for k, v in instance.__dict__.items() if not k.startswith("_")}
+    return json.dumps(data, default=str, sort_keys=True)
+
+
+def _payload_hash(instance) -> str:
+    return hashlib.sha256(_serialize_payload(instance).encode("utf-8")).hexdigest()
+
+
+def _resolve_actor(request=None):
+    """Return (user_id, ip, user_agent) for the current request, if available."""
+    if request is None:
+        return None, None, ""
+    user = getattr(request, "user", None)
+    user_id = getattr(user, "id", None) if user and user.is_authenticated else None
+    # request.ip / request.user_agent are attached by AuditMiddleware if present;
+    # otherwise fall back to REMOTE_ADDR.
+    ip = getattr(request, "ip", None) or request.META.get("REMOTE_ADDR")
+    user_agent = getattr(request, "user_agent", "") or request.META.get(
+        "HTTP_USER_AGENT", ""
+    )[:255]
+    return user_id, ip, user_agent
+
+
+def _is_audited(model) -> bool:
+    return bool(getattr(model._meta, "audited", False))
+
+
+def register_audit_signals(model) -> None:
+    """Wire post_save + post_delete on the given model.
+
+    No-op if the model isn't audited or signals are already connected.
+    """
+    if not _is_audited(model):
+        return
+
+    @receiver(post_save, sender=model, weak=False)
+    def _on_save(sender, instance, created, **kwargs):
+        action = "created" if created else "updated"
+        user_id, ip, user_agent = _resolve_actor(getattr(instance, "_audit_request", None))
+        AuditLog.all_objects.create(
+            actor_id=user_id,
+            action=action,
+            entity_type=instance._meta.label,
+            entity_id=str(instance.pk),
+            payload_hash=_payload_hash(instance),
+            ip=ip,
+            user_agent=user_agent,
+        )
+
+    @receiver(post_delete, sender=model, weak=False)
+    def _on_delete(sender, instance, **kwargs):
+        user_id, ip, user_agent = _resolve_actor(getattr(instance, "_audit_request", None))
+        AuditLog.all_objects.create(
+            actor_id=user_id,
+            action="deleted",
+            entity_type=instance._meta.label,
+            entity_id=str(instance.pk),
+            payload_hash=_payload_hash(instance),
+            ip=ip,
+            user_agent=user_agent,
+        )

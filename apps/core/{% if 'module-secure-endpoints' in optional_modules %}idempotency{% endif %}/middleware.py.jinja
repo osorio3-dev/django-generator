@@ -1,0 +1,118 @@
+"""Idempotency middleware for safe retries of state-mutating requests.
+
+Implements the Idempotency-Key pattern (similar to Stripe's API): clients send
+an ``X-Idempotency-Key`` header with mutating requests (POST/PUT/PATCH/DELETE).
+The middleware caches the response body in ``IdempotencyKey`` and replays it on
+retry — within the TTL — instead of executing the handler twice.
+
+This is opt-in: requests WITHOUT the header behave normally. The header is
+only required when the client wants at-most-once semantics.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Callable
+
+from django.db import transaction
+from django.http import HttpRequest, HttpResponse
+
+from apps.core.idempotency.models import IdempotencyKey
+
+
+class IdempotencyMiddleware:
+    """Replay responses for retried mutating requests identified by X-Idempotency-Key.
+
+    Storage strategy: ``IdempotencyKey`` row keyed by (tenant_id, key) with a
+    payload_hash of the request body. On retry:
+    - Same hash → return the cached response.
+    - Different hash → return 409 (rejected; key reused for a different payload).
+    """
+
+    HEADER = "X-Idempotency-Key"
+    HEADER_HASH = "X-Payload-Hash"
+    DEFAULT_TTL_SECONDS = 60 * 60 * 24  # 24h
+    MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if request.method not in self.MUTATING_METHODS:
+            return self.get_response(request)
+
+        key = request.headers.get(self.HEADER, "").strip()
+        if not key:
+            # No idempotency key → request is not retried-protected.
+            return self.get_response(request)
+
+        payload_hash = self._hash_body(request)
+
+        # Resolve tenant if multitenant is active; falls back to None.
+        tenant = getattr(request, "tenant", None)
+        tenant_id = getattr(tenant, "id", None)
+
+        cached = IdempotencyKey.objects.filter(
+            tenant_id=tenant_id, key=key
+        ).first()
+
+        if cached is not None:
+            if cached.payload_hash != payload_hash:
+                return HttpResponse(
+                    "Idempotency-Key reused with a different payload.",
+                    status=409,
+                    content_type="text/plain",
+                )
+            # Same key + same payload → replay.
+            response = HttpResponse(
+                cached.response_body or "",
+                status=cached.response_status,
+                content_type=cached.response_content_type or "text/html",
+            )
+            response["X-Idempotent-Replay"] = "true"
+            return response
+
+        response = self.get_response(request)
+        # Only cache 2xx and 4xx (skip 5xx so transient server errors retry).
+        if 200 <= response.status_code < 500:
+            try:
+                self._persist(
+                    tenant_id=tenant_id,
+                    key=key,
+                    payload_hash=payload_hash,
+                    response=response,
+                )
+            except Exception:
+                # Persistence failures must NEVER break the request flow. Log
+                # via structlog at the call site if needed.
+                pass
+
+        response[self.HEADER_HASH] = payload_hash[:16]
+        return response
+
+    @staticmethod
+    def _hash_body(request: HttpRequest) -> str:
+        """SHA256 of the request body. Empty body for GET-like (won't reach here)."""
+        body = request.body or b""
+        return hashlib.sha256(body).hexdigest()
+
+    @staticmethod
+    def _persist(
+        *,
+        tenant_id: int | None,
+        key: str,
+        payload_hash: str,
+        response: HttpResponse,
+    ) -> None:
+        body = response.content.decode("utf-8", errors="replace")
+        with transaction.atomic():
+            IdempotencyKey.objects.update_or_create(
+                tenant_id=tenant_id,
+                key=key,
+                defaults={
+                    "payload_hash": payload_hash,
+                    "response_body": body[:65535],  # cap to TextField-safe size
+                    "response_status": response.status_code,
+                    "response_content_type": response.get("Content-Type", "text/html"),
+                },
+            )

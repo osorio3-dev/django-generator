@@ -1,0 +1,83 @@
+"""Signed ephemeral tokens (HMAC-based).
+
+Generates short-lived opaque tokens tied to a payload (e.g. ``user_id``,
+``action``, ``tenant_id``). The token is a ``<payload_b64>.<signature>``
+string. Verification rebuilds the signature with the shared secret and
+constant-time-compares.
+
+NOT a replacement for JWT — no rotation, no kid, no audience claims. Use it
+for narrow internal cases: "send this email with a link that lets the
+recipient perform action X within 1h".
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import time
+from typing import Any
+
+from django.conf import settings
+
+
+def _secret() -> bytes:
+    """Resolve the HMAC signing key.
+
+    Prefers ``SIGNED_TOKEN_SECRET``; falls back to ``SECRET_KEY``. Either
+    way, the key is rejected if it's the default placeholder.
+    """
+    raw = getattr(settings, "SIGNED_TOKEN_SECRET", None) or settings.SECRET_KEY
+    if not raw or "your-secret-key" in raw or "change-me" in raw:
+        raise ValueError(
+            "SIGNED_TOKEN_SECRET (or SECRET_KEY) is not configured. "
+            "Set SIGNED_TOKEN_SECRET in your .env to a strong random value."
+        )
+    return raw.encode("utf-8")
+
+
+def _b64encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64decode(data: str) -> bytes:
+    pad = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + pad)
+
+
+def issue(payload: dict[str, Any], *, ttl_seconds: int = 3600) -> str:
+    """Sign a payload and return a ``<body>.<sig>`` token.
+
+    The body is JSON of ``{"exp": int, "data": payload}``. ttl_seconds is
+    the validity window starting now.
+    """
+    body = {"exp": int(time.time()) + ttl_seconds, "data": payload}
+    body_json = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    body_b64 = _b64encode(body_json)
+    sig = hmac.new(_secret(), body_b64.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{body_b64}.{sig}"
+
+
+def verify(token: str) -> dict[str, Any] | None:
+    """Verify a token. Returns the payload dict on success, None on failure.
+
+    Failures (any of these) all return None — never raise:
+    - malformed token
+    - bad signature
+    - expired
+    - decoding error
+    """
+    if not token or "." not in token:
+        return None
+    body_b64, sig = token.rsplit(".", 1)
+    expected = hmac.new(_secret(), body_b64.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return None
+    try:
+        body = json.loads(_b64decode(body_b64))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if int(body.get("exp", 0)) < int(time.time()):
+        return None
+    return body.get("data")

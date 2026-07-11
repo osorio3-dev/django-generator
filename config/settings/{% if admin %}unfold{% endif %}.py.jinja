@@ -1,0 +1,140 @@
+{% if admin -%}
+"""UNFOLD admin settings — isolated from base.py.
+
+This module is imported by ``base.py`` only when ``admin=true``. It centralises
+the Unfold configuration (branding, sidebar navigation, tabs, colors, command
+palette) so the rest of the settings stays focused on infrastructure.
+
+Spanish labels are intentional — the project owner works in Spanish.
+"""
+{% endif %}
+{% if admin %}
+import os
+
+from django.utils.translation import gettext_lazy as _
+
+
+def _parse_bool_env(key: str, default: str = "false") -> bool:
+    """Parse a boolean env var case-insensitively."""
+    raw = os.environ.get(key, default)
+    return raw.lower() in ("true", "1", "yes")
+
+
+def _environment(request):
+    """Return the environment badge shown in the admin header.
+
+    Reads DEBUG at runtime (not at module import) so toggling the env var
+    doesn't require a settings reload.
+    """
+    if _parse_bool_env("DEBUG"):
+        return "local"
+    return os.environ.get("DJANGO_ENVIRONMENT", "production")
+
+
+def _disable_command_in_production():
+    """Hide dangerous commands from the Cmd+K palette when not in DEBUG."""
+    if _parse_bool_env("DEBUG"):
+        return []
+    return ["makemessages", "compilemessages", "makemigrations"]
+
+
+UNFOLD = {
+    # ---------------------------------------------------------------------------
+    # Site branding
+    # ---------------------------------------------------------------------------
+    "SITE_TITLE": "{{ project_name }}",
+    "SITE_HEADER": "{{ project_name }}",
+    "SITE_SUBHEADER": "_{{ project_slug }}_",
+    "SITE_URL": "/",
+    "SITE_FAVICONS": [],
+    # ---------------------------------------------------------------------------
+    # Login screen
+    # ---------------------------------------------------------------------------
+    "LOGIN": {
+        "redirect_url": "/admin/",
+        "logo": [],
+    },
+    # ---------------------------------------------------------------------------
+    # Sidebar navigation
+    # ---------------------------------------------------------------------------
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "Usuarios",
+                "icon": "people",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {"title": "Usuarios", "icon": "person", "link": "/admin/accounts/user/"},
+                    {"title": "Grupos", "icon": "group", "link": "/admin/auth/group/"},
+                ],
+            },
+            {
+                "title": "Configuración",
+                "icon": "settings",
+                "separator": True,
+                "items": [
+                    {"title": "Sitios", "icon": "public", "link": "/admin/sites/site/"},
+                ],
+            },
+{%- if include_jobs %}
+            {
+                "title": "Tareas Programadas",
+                "icon": "pending_actions",
+                "separator": True,
+                "items": [
+                    {"title": "Cola", "icon": "schedule", "link": "/admin/django_q/queue/"},
+                    {"title": "Programadas", "icon": "event", "link": "/admin/django_q/schedule/"},
+                    {"title": "Exitosas", "icon": "check_circle", "link": "/admin/django_q/success/"},
+                    {"title": "Fallidas", "icon": "error", "link": "/admin/django_q/failure/"},
+                ],
+            },
+{%- endif %}
+{%- if include_multitenant or 'module-multitenant' in optional_modules %}
+            {
+                "title": "Tenants",
+                "icon": "apartment",
+                "separator": True,
+                "items": [
+                    {"title": "Tenants", "icon": "apartment", "link": "/admin/tenants/tenant/"},
+                ],
+            },
+{%- endif %}
+        ],
+    },
+    # ---------------------------------------------------------------------------
+    # Top tabs (currently just the dashboard)
+    # ---------------------------------------------------------------------------
+    "TABS": [
+        {
+            "title": "Dashboard",
+            "icon": "dashboard",
+            "link": "/admin/",
+            "items": [],
+        },
+    ],
+    # ---------------------------------------------------------------------------
+    # Color palette (Tailwind v4 OKLCH scale; flat hex is fine for Unfold 0.4+)
+    # ---------------------------------------------------------------------------
+    "COLORS": {
+        "primary": "#3b82f6",
+        "secondary": "#64748b",
+    },
+    # ---------------------------------------------------------------------------
+    # Compiled assets — only present when a frontend pipeline exists.
+    # ---------------------------------------------------------------------------
+    "STYLES": [{% if frontend %}"css/dist.css"{% endif %}],
+    "SCRIPTS": [{% if frontend %}"js/preline.js"{% endif %}],
+    # ---------------------------------------------------------------------------
+    # Behaviour
+    # ---------------------------------------------------------------------------
+    "ENVIRONMENT": _environment,
+    "SHOW_HISTORY": True,
+    "EDITABLE_INLINES": True,
+    "COMMAND": {
+        "disable_command": _disable_command_in_production(),
+    },
+}
+{% endif %}

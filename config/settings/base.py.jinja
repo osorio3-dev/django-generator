@@ -257,3 +257,14 @@ LOGGING = {
 
 from apps.core.utils.logging_config import configure_logging  # noqa: E402
 configure_logging(debug=DEBUG)
+{% if admin %}
+# ---------------------------------------------------------------------------
+# Unfold admin configuration (isolated from base.py)
+# ---------------------------------------------------------------------------
+# The full UNFOLD dict lives in config/settings/unfold.py to keep this file
+# focused on infrastructure. Imported here so every environment (local,
+# production, test) gets the same admin branding without duplicating config.
+from config.settings import unfold  # noqa: E402
+
+UNFOLD = unfold.UNFOLD
+{% endif %}

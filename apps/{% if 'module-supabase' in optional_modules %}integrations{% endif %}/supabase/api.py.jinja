@@ -1,0 +1,20 @@
+"""Supabase API endpoints (Django Ninja).
+
+Mounted under ``/api/supabase/`` when ``api=true`` and ``module-supabase``
+are both selected. The module's service clients remain the source of truth;
+this router only exposes a minimal health probe so the main API can mount the
+module safely.
+"""
+
+from __future__ import annotations
+
+from django.http import HttpRequest
+from ninja import Router
+
+router = Router()
+
+
+@router.get("/health/")
+def health(request: HttpRequest) -> dict[str, str]:
+    """Module-level health probe."""
+    return {"status": "ok", "module": "supabase"}

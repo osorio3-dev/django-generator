@@ -28,6 +28,21 @@ api = NinjaAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+{% if 'module-wompi' in optional_modules %}
+from apps.payments.wompi.api import router as wompi_router  # noqa: E402
+
+api.add_router("/wompi", wompi_router)
+{% endif %}
+{% if 'module-ghl' in optional_modules %}
+from apps.integrations.ghl.api import router as ghl_router  # noqa: E402
+
+api.add_router("/ghl", ghl_router)
+{% endif %}
+{% if 'module-supabase' in optional_modules %}
+from apps.integrations.supabase.api import router as supabase_router  # noqa: E402
+
+api.add_router("/supabase", supabase_router)
+{% endif %}
 
 
 @api.get("/health", tags=["health"])

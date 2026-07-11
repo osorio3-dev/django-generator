@@ -65,7 +65,9 @@ def test_ghl_refreshes_on_401(settings):
 
 
 @pytest.mark.django_db
-def test_ghl_installation_stores_tokens_encrypted(settings):
+def test_ghl_installation_encrypts_tokens_at_rest_and_returns_plaintext(settings):
+    from django.db import connection
+
     if not {{ 'True' if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) else 'False' }}:
         pytest.skip("Fernet not active — tokens stored as plain CharField.")
 
@@ -82,14 +84,26 @@ def test_ghl_installation_stores_tokens_encrypted(settings):
 {%- endif %}
         location_id="loc_test",
         location_name="Test Location",
-        access_token="access-token-xyz",
-        refresh_token="refresh-token-xyz",
+        access_token="access-token-plaintext",
+        refresh_token="refresh-token-plaintext",
         scopes="contacts.read",
         is_active=True,
     )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT access_token, refresh_token FROM {GhlInstallation._meta.db_table} WHERE id = %s",
+            [installation.id],
+        )
+        raw_access_token, raw_refresh_token = cursor.fetchone()
+
+    assert raw_access_token.startswith("gAAAAA")
+    assert raw_refresh_token.startswith("gAAAAA")
+    assert raw_access_token != "access-token-plaintext"
+
     installation.refresh_from_db()
-    assert installation.access_token.startswith("gAAAAA")
-    assert installation.refresh_token.startswith("gAAAAA")
+    assert installation.access_token == "access-token-plaintext"
+    assert installation.refresh_token == "refresh-token-plaintext"
 
 
 @pytest.mark.django_db

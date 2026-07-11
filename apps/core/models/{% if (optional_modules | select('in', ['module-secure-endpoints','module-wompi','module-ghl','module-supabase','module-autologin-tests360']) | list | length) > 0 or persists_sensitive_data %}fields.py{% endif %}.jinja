@@ -125,11 +125,6 @@ class EncryptedCharField(EncryptedFieldMixin, models.TextField):
         self._ui_max_length = max_length  # widget hint only
         super().__init__(*args, **kwargs)
 
-    def pre_save(self, model_instance, add):
-        """Encrypt the value before saving."""
-        value = getattr(model_instance, self.attname)
-        return self.get_prep_value(value)
-
     def formfield(self, **kwargs):
         """Pass max_length to the form widget as a UX hint only."""
         defaults = {"max_length": self._ui_max_length} if self._ui_max_length else {}
@@ -144,10 +139,6 @@ class EncryptedTextField(EncryptedFieldMixin, models.TextField):
         kwargs.setdefault("blank", True)
         kwargs.setdefault("default", "")
         super().__init__(*args, **kwargs)
-
-    def pre_save(self, model_instance, add):
-        value = getattr(model_instance, self.attname)
-        return self.get_prep_value(value)
 
 
 class EncryptedJSONField(EncryptedFieldMixin, models.TextField):
@@ -186,7 +177,3 @@ class EncryptedJSONField(EncryptedFieldMixin, models.TextField):
         if value in (None, ""):
             return ""
         return _fernet.encrypt(json.dumps(value, default=str))
-
-    def pre_save(self, model_instance, add):
-        value = getattr(model_instance, self.attname)
-        return self.get_prep_value(value)

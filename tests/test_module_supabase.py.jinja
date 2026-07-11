@@ -76,9 +76,11 @@ def test_service_role_client_sends_correct_headers():
 
 
 @pytest.mark.django_db
-def test_supabase_config_stores_keys_encrypted():
+def test_supabase_config_encrypts_keys_at_rest_and_returns_plaintext():
     if not {{ 'True' if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) else 'False' }}:
         pytest.skip("Fernet not active — keys stored as plain CharField.")
+
+    from django.db import connection
 
     from apps.integrations.supabase.models import SupabaseConfig
 {% if include_multitenant and multitenant_isolation == 'logical' %}
@@ -92,11 +94,23 @@ def test_supabase_config_stores_keys_encrypted():
         tenant=tenant,
 {%- endif %}
         project_url="https://abc.supabase.co",
-        anon_key="anon-xxx",
-        service_role_key="service-xxx",
+        anon_key="anon-plaintext",
+        service_role_key="service-plaintext",
         jwt_secret="jwt-xxx",
         is_active=True,
     )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT anon_key, service_role_key FROM {SupabaseConfig._meta.db_table} WHERE id = %s",
+            [cfg.id],
+        )
+        raw_anon_key, raw_service_role_key = cursor.fetchone()
+
+    assert raw_anon_key.startswith("gAAAAA")
+    assert raw_service_role_key.startswith("gAAAAA")
+    assert raw_service_role_key != "service-plaintext"
+
     cfg.refresh_from_db()
-    assert cfg.anon_key.startswith("gAAAAA")
-    assert cfg.service_role_key.startswith("gAAAAA")
+    assert cfg.anon_key == "anon-plaintext"
+    assert cfg.service_role_key == "service-plaintext"

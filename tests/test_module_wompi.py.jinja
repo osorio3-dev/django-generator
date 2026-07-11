@@ -116,8 +116,10 @@ def test_wompi_verifier_accepts_correct_signature():
 
 
 @pytest.mark.django_db
-def test_wompi_config_stores_encrypted_secret(settings):
-    """Fernet must be active when Wompi is selected, so secrets are encrypted at rest."""
+def test_wompi_config_encrypts_secret_at_rest_and_returns_plaintext(settings):
+    """EncryptedCharField stores ciphertext in DB but returns plaintext after ORM reload."""
+    from django.db import connection
+
     from apps.payments.wompi.models import WompiConfig
 
     if not {{ 'True' if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) else 'False' }}:
@@ -136,13 +138,24 @@ def test_wompi_config_stores_encrypted_secret(settings):
         name="test",
 {%- endif %}
         public_key="pub_test",
-        private_key="sk_test_xxx",
-        events_secret="evt_test_xxx",
-        integrity_secret="int_test_xxx",
+        private_key="sk_test_plaintext",
+        events_secret="evt_test_plaintext",
+        integrity_secret="int_test_plaintext",
     )
-    cfg.refresh_from_db()
 
-    # The Fernet cipher always starts with "gAAAAA". Plaintext columns never do.
-    assert cfg.private_key.startswith("gAAAAA")
-    assert cfg.events_secret.startswith("gAAAAA")
-    assert cfg.integrity_secret.startswith("gAAAAA")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT private_key, events_secret, integrity_secret FROM {WompiConfig._meta.db_table} WHERE id = %s",
+            [cfg.id],
+        )
+        raw_private_key, raw_events_secret, raw_integrity_secret = cursor.fetchone()
+
+    assert raw_private_key.startswith("gAAAAA")
+    assert raw_events_secret.startswith("gAAAAA")
+    assert raw_integrity_secret.startswith("gAAAAA")
+    assert raw_private_key != "sk_test_plaintext"
+
+    cfg.refresh_from_db()
+    assert cfg.private_key == "sk_test_plaintext"
+    assert cfg.events_secret == "evt_test_plaintext"
+    assert cfg.integrity_secret == "int_test_plaintext"

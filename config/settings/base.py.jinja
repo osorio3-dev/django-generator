@@ -151,7 +151,9 @@ PROJECT_APPS = [
 {%- if 'module-autologin-tests360' in optional_modules and admin %}
     "apps.accounts.autologin",
 {%- endif %}
+    # --- end generator-managed INSTALLED_APPS ---
 ]
+
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
 {% if (include_multitenant or 'module-multitenant' in optional_modules) and multitenant_isolation == 'schema' %}

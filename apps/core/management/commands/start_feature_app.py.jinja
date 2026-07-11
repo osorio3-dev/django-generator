@@ -1,29 +1,47 @@
 """Management command to scaffold a new feature app under apps/."""
 
+import re
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
+from django.conf import settings
 
 
 class Command(BaseCommand):
-    help = "Create a new feature app under apps/ with the standard directory structure."
+    help = (
+        "Create a new feature app under apps/ with the standard directory "
+        "structure AND wire it into INSTALLED_APPS, pyproject.toml packages, "
+        "config/urls.py, plus a migrations/ folder and a BaseModel-ready models/."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("name", type=str, help="App name (e.g. billing)")
+        parser.add_argument(
+            "--no-urls",
+            action="store_true",
+            help="Skip wiring URL include into config/urls.py",
+        )
+        parser.add_argument(
+            "--no-install",
+            action="store_true",
+            help="Skip adding the app to INSTALLED_APPS and pyproject packages",
+        )
 
-    def handle(self, *args, **options):
-        name = options["name"]
-        base = Path("apps") / name
+    def _validate_name(self, name: str) -> str:
+        if not re.match(r"^[a-z][a-z0-9_]*$", name):
+            raise CommandError(
+                f"Invalid app name '{name}'. Use snake_case (lowercase, digits, underscore), starting with a letter."
+            )
+        return name
 
-        if base.exists():
-            raise CommandError(f"App apps/{name} already exists")
-
-        dirs = ["admin", "models", "views", "services", "forms", "tests"]
+    def _make_app_skeleton(self, base, name: str) -> None:
+        dirs = ["admin", "models", "views", "services", "forms", "tests", "migrations"]
         for d in dirs:
             (base / d).mkdir(parents=True, exist_ok=True)
             (base / d / "__init__.py").touch()
 
         (base / "__init__.py").touch()
+
         (base / "apps.py").write_text(
             f"""from django.apps import AppConfig
 
@@ -34,10 +52,120 @@ class {name.capitalize()}Config(AppConfig):
     verbose_name = "{name.capitalize()}"
 """
         )
+
         (base / "urls.py").write_text("from django.urls import path\n\nurlpatterns = []\n")
+
+        (base / "models" / "__init__.py").write_text(
+            '"""Models for apps.{name} — inherit from apps.core.models.BaseModel."""\n\n'
+            "from apps.core.models import BaseModel  # noqa: F401\n\n"
+            "__all__ = []\n"
+        )
+
+        (base / "migrations" / "__init__.py").touch()  # ensure empty __init__.py
+
+    def _add_to_installed_apps(self, app_label: str) -> None:
+        base_settings = (
+            Path(settings.BASE_DIR) / "config" / "settings" / "base.py"
+        )
+        if not base_settings.exists():
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  ! base.py not found at {base_settings}. Skipping INSTALLED_APPS update."
+                )
+            )
+            return
+
+        content = base_settings.read_text()
+        if f'"apps.{app_label}"' in content:
+            self.stdout.write(
+                f"  · apps.{app_label} already in INSTALLED_APPS"
+            )
+            return
+
+        marker = "# --- end generator-managed INSTALLED_APPS ---"
+        if marker not in content:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  ! marker '{marker}' not found in base.py. "
+                    f"Add INSTALLED_APPS update manually."
+                )
+            )
+            return
+
+        injection = (
+            f"\n    # Auto-added by start_feature_app\n"
+            f'    "apps.{app_label}",'
+        )
+        new_content = content.replace(marker, injection + "\n" + marker)
+        base_settings.write_text(new_content)
+        self.stdout.write(self.style.SUCCESS(f"  ✓ added apps.{app_label} to INSTALLED_APPS"))
+
+    def _add_to_pyproject_packages(self, app_label: str) -> None:
+        # pyproject.toml uses setuptools.packages.find with `include = ["apps*"]`,
+        # which auto-discovers new apps/<name>/ directories. No manual update
+        # of pyproject.toml is required when adding a new app. This method is
+        # kept as a no-op to preserve the command's interface (the --no-install
+        # flag still gates the INSTALLED_APPS update separately).
+        self.stdout.write(
+            f"  · apps.{app_label} auto-discovered by setuptools.packages.find "
+            f"(no pyproject.toml edit needed)"
+        )
+
+    def _add_url_include(self, app_label: str) -> None:
+        urls = Path(settings.BASE_DIR) / "config" / "urls.py"
+        if not urls.exists():
+            return
+
+        content = urls.read_text()
+        if f'"apps.{app_label}.urls"' in content:
+            self.stdout.write(
+                f"  · apps.{app_label}.urls already included"
+            )
+            return
+
+        marker = "    # --- end generator-managed url includes ---"
+        if marker not in content:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  ! marker '{marker}' not found in config/urls.py. "
+                    f"Add URL include manually."
+                )
+            )
+            return
+
+        injection = (
+            f"    path(\"\", include(\"apps.{app_label}.urls\")),\n"
+        )
+        new_content = content.replace(marker, injection + marker)
+        urls.write_text(new_content)
+        self.stdout.write(
+            self.style.SUCCESS(f"  ✓ wired apps.{app_label}.urls into config/urls.py")
+        )
+
+    def handle(self, *args, **options):
+        name = self._validate_name(options["name"])
+        base = Path("apps") / name
+
+        if base.exists():
+            raise CommandError(f"App apps/{name} already exists")
+
+        self._make_app_skeleton(base, name)
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Created apps/{name}/ with admin/, models/, views/, services/, forms/, tests/, migrations/"
+            )
+        )
+
+        if not options["no_install"]:
+            self._add_to_installed_apps(name)
+            self._add_to_pyproject_packages(name)
+
+        if not options["no_urls"]:
+            self._add_url_include(name)
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Created apps/{name}/ with admin/, models/, views/, services/, forms/, tests/"
+                f"\nNext: edit apps/{name}/models/__init__.py to declare your models, "
+                f"then run `python manage.py makemigrations {name}`."
             )
         )

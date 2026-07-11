@@ -6,42 +6,14 @@
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-# packages list is built dynamically below — Copier Jinja resolves the conditional
-# modules to determine which apps exist in the generated project. Keep this in sync
-# with the PROJECT_APPS list in config/settings/base.py.jinja.
-{% set _packages = ["apps", "config", "apps.core", "apps.core.models", "apps.core.middleware", "apps.core.utils", "apps.core.management", "apps.core.management.commands", "apps.core.views"] -%}
-{%- if admin %}
-{%- set _packages = _packages + ["apps.accounts", "apps.accounts.models", "apps.accounts.admin", "apps.accounts.adapters", "apps.accounts.migrations"] %}
-{%- endif %}
-{%- if 'module-autologin-tests360' in optional_modules and admin %}
-{%- set _packages = _packages + ["apps.accounts.autologin", "apps.accounts.autologin.migrations"] %}
-{%- endif %}
-{%- if frontend %}
-{%- set _packages = _packages + ["apps.web"] %}
-{%- endif %}
-{%- if include_multitenant or 'module-multitenant' in optional_modules %}
-{%- set _packages = _packages + ["apps.tenants", "apps.tenants.migrations"] %}
-{%- endif %}
-{%- if 'module-wompi' in optional_modules %}
-{%- set _packages = _packages + ["apps.payments", "apps.payments.wompi", "apps.payments.wompi.migrations"] %}
-{%- endif %}
-{%- if 'module-ghl' in optional_modules or 'module-supabase' in optional_modules %}
-{%- set _packages = _packages + ["apps.integrations"] %}
-{%- endif %}
-{%- if 'module-ghl' in optional_modules %}
-{%- set _packages = _packages + ["apps.integrations.ghl", "apps.integrations.ghl.migrations"] %}
-{%- endif %}
-{%- if 'module-supabase' in optional_modules %}
-{%- set _packages = _packages + ["apps.integrations.supabase", "apps.integrations.supabase.migrations"] %}
-{%- endif %}
-{%- if 'module-realtime' in optional_modules %}
-{%- set _packages = _packages + ["apps.realtime"] %}
-{%- endif %}
-{%- if api %}
-{%- set _packages = _packages + ["apps.api"] %}
-{%- endif %}
-packages = {{ _packages | to_json }}
+# setuptools discovers packages automatically via namespace packages.
+# New apps added by `manage.py start_feature_app <name>` are picked up
+# without modifying this file. INSTALLED_APPS in config/settings/base.py
+# is still Jinja-managed since Django needs explicit registration.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "config*"]
+namespaces = true
 
 [project]
 name = "{{ project_slug }}"

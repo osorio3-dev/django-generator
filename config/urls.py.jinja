@@ -66,5 +66,6 @@ urlpatterns += [
 # the SPA catch-all above already claimed "/" and "/dashboard/".
 urlpatterns += [
     path("", include("apps.web.urls")),
+    # --- end generator-managed url includes ---
 ]
-{%- endif %}
+{% endif %}

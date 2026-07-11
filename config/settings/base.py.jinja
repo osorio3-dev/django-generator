@@ -64,12 +64,24 @@ THIRD_PARTY_APPS = [
     "unfold.contrib.filters",
     "unfold.contrib.forms",
 {%- endif %}
+{%- if frontend %}
+    "django_htmx",
+{%- endif %}
+{%- if frontend and frontend_style == 'server-rendered' %}
+    "django_cotton",
+{%- endif %}
+{%- if frontend %}
+    "django_vite",
+{%- endif %}
 ]
 
 PROJECT_APPS = [
     "apps.core",
 {%- if admin %}
     "apps.accounts",
+{%- endif %}
+{%- if frontend %}
+    "apps.web",
 {%- endif %}
 ]
 
@@ -93,6 +105,9 @@ MIDDLEWARE = [
 {%- if admin %}
     "allauth.account.middleware.AccountMiddleware",
 {%- endif %}
+{%- if frontend %}
+    "django_htmx.middleware.HtmxMiddleware",
+{%- endif %}
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -115,6 +130,9 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
+{%- if frontend and frontend_style == 'server-rendered' %}
+            "builtins": ["django_cotton.templatetags.cotton"],
+{%- endif %}
         },
     },
 ]
@@ -175,7 +193,12 @@ USE_TZ = True
 # ---------------------------------------------------------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "static_root"
+{% if frontend -%}
 STATICFILES_DIRS = [BASE_DIR / "static"]
+{% else -%}
+# When frontend is disabled, the static/ directory is empty. Django's check
+# W004 warns about missing dirs in STATICFILES_DIRS, so we omit it entirely.
+{%- endif %}
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -184,6 +207,21 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
+{% if frontend %}
+# ---------------------------------------------------------------------------
+# django-vite (Vite asset pipeline)
+# ---------------------------------------------------------------------------
+# Dev mode follows DEBUG: when DEBUG is True, the vite dev server (port 5173)
+# serves assets via HMR. When False (production), django-vite reads the manifest
+# emitted by `vite build` (manifest.json at static/dist/manifest.json).
+# See vite.config.ts for outDir / manifest filename agreement.
+DJANGO_VITE = {
+    "default": {
+        "dev_mode": DEBUG,
+        "manifest_path": BASE_DIR / "static" / "dist" / "manifest.json",
+    },
+}
+{% endif %}
 {% if include_jobs %}
 # ---------------------------------------------------------------------------
 # django-q2 (background jobs)

@@ -1,6 +1,6 @@
 """Root URL configuration."""
 
-from django.urls import include, path
+from django.urls import include, path  # noqa: F401
 
 from apps.core.views.health import health_check
 
@@ -33,5 +33,31 @@ from apps.api.router import api  # noqa: E402
 
 urlpatterns += [
     path("api/", api.urls),
+]
+{%- endif %}
+{% if frontend and frontend_style == 'vue-spa' %}
+# vue-spa: SPA catch-all MUST come BEFORE apps.web.urls so it intercepts
+# client-side routes (/, /dashboard/). Django-side endpoints (admin/, api/,
+# accounts/, health/) are excluded by the regex and fall through to the
+# configured routers. URLs ending in a dot (static assets with extensions)
+# also fall through so WhiteNoise can serve them.
+from django.urls import re_path  # noqa: E402
+from django.views.generic import TemplateView  # noqa: E402
+
+urlpatterns += [
+    re_path(
+        r"^(?!api/|admin/|accounts/|static/|health/|.*\.).*$",
+        TemplateView.as_view(template_name="vue_spa.html"),
+        name="vue_spa_catchall",
+    ),
+]
+{%- endif %}
+{% if frontend %}
+# frontend enabled — mount the web app at the project root.
+# The reverse lookup namespace is "web" (reverse("web:landing") etc.).
+# For vue-spa, only `web:health_frontend` (under /health/) survives because
+# the SPA catch-all above already claimed "/" and "/dashboard/".
+urlpatterns += [
+    path("", include("apps.web.urls")),
 ]
 {%- endif %}

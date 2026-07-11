@@ -1,0 +1,50 @@
+"""Tests for Unfold admin integration (admin=unfold).
+
+Asserts the locked-in contracts:
+- ``UNFOLD`` dict is present in settings when admin=unfold is enabled
+- ``SITE_TITLE`` matches the project name baked at copier-copy time
+- ``unfold`` and ``allauth`` apps are wired in INSTALLED_APPS
+- ``SIDEBAR`` navigation has at least one group
+
+The whole module is skipped when ``admin=false`` because the ``UNFOLD`` dict
+and the ``unfold`` package are absent from the generated project in that case.
+"""
+
+import pytest
+from django.conf import settings
+
+
+pytestmark = pytest.mark.skipif(
+    not hasattr(settings, "UNFOLD"),
+    reason="UNFOLD not configured — admin=unfold not enabled",
+)
+
+
+def test_unfold_dict_is_present_and_is_a_dict():
+    """UNFOLD must be a dict (not None, not a callable) when defined."""
+    assert isinstance(settings.UNFOLD, dict)
+
+
+def test_unfold_site_title_matches_project_name():
+    """SITE_TITLE must match the project_name baked in by copier."""
+    assert settings.UNFOLD.get("SITE_TITLE") == "{{ project_name }}"
+
+
+def test_unfold_app_is_installed():
+    """unfold must be in INSTALLED_APPS."""
+    assert "unfold" in settings.INSTALLED_APPS
+
+
+def test_allauth_app_is_installed():
+    """django-allauth is auto-paired with unfold per the locked decision."""
+    assert "allauth" in settings.INSTALLED_APPS
+
+
+def test_unfold_sidebar_navigation_has_at_least_one_group():
+    """SIDEBAR navigation must contain at least one group of items."""
+    sidebar = settings.UNFOLD.get("SIDEBAR", {})
+    navigation = sidebar.get("navigation", [])
+    assert isinstance(navigation, list)
+    assert len(navigation) >= 1, (
+        f"SIDEBAR navigation must have at least one group. Got: {navigation!r}"
+    )

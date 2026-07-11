@@ -1,0 +1,75 @@
+"""structlog configuration for structured logging.
+
+Includes automatic redaction of sensitive fields from log output.
+"""
+
+import structlog
+
+
+def _redact_sensitive(logger, method_name, event_dict):
+    """Redact sensitive fields from log output.
+
+    Sensitive field names (case-insensitive substring match in keys):
+    - password, secret, token, access_token, refresh_token, csrfmiddlewaretoken,
+      api_key, apikey, auth_token, private_key, sessionid
+    """
+    sensitive_keys = {
+        "password",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+        "csrfmiddlewaretoken",
+        "api_key",
+        "apikey",
+        "auth_token",
+        "private_key",
+        "sessionid",
+        "session_id",
+        "credit_card",
+        "ssn",
+    }
+
+    for key in list(event_dict.keys()):
+        key_lower = key.lower()
+        if any(sk in key_lower for sk in sensitive_keys):
+            event_dict[key] = "[REDACTED]"
+
+    return event_dict
+
+
+def configure_logging(debug: bool = False) -> None:
+    """Configure structlog with appropriate processors.
+
+    Args:
+        debug: If True, use console-friendly rendering instead of JSON.
+    """
+    shared_processors: list = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        _redact_sensitive,
+    ]
+
+    if debug:
+        processors = shared_processors + [
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.dev.ConsoleRenderer(),
+        ]
+    else:
+        processors = shared_processors + [
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(),
+        ]
+
+    structlog.configure(
+        processors=processors,
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )

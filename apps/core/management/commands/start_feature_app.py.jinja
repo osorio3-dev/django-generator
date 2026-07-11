@@ -1,0 +1,43 @@
+"""Management command to scaffold a new feature app under apps/."""
+
+from pathlib import Path
+
+from django.core.management.base import BaseCommand, CommandError
+
+
+class Command(BaseCommand):
+    help = "Create a new feature app under apps/ with the standard directory structure."
+
+    def add_arguments(self, parser):
+        parser.add_argument("name", type=str, help="App name (e.g. billing)")
+
+    def handle(self, *args, **options):
+        name = options["name"]
+        base = Path("apps") / name
+
+        if base.exists():
+            raise CommandError(f"App apps/{name} already exists")
+
+        dirs = ["admin", "models", "views", "services", "forms", "tests"]
+        for d in dirs:
+            (base / d).mkdir(parents=True, exist_ok=True)
+            (base / d / "__init__.py").touch()
+
+        (base / "__init__.py").touch()
+        (base / "apps.py").write_text(
+            f"""from django.apps import AppConfig
+
+
+class {name.capitalize()}Config(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.{name}"
+    verbose_name = "{name.capitalize()}"
+"""
+        )
+        (base / "urls.py").write_text("from django.urls import path\n\nurlpatterns = []\n")
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Created apps/{name}/ with admin/, models/, views/, services/, forms/, tests/"
+            )
+        )

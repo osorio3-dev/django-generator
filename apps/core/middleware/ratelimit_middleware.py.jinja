@@ -1,0 +1,57 @@
+"""Rate limiting middleware.
+
+Uses atomic cache.incr() to prevent race conditions between concurrent
+requests. Mounted in MIDDLEWARE by default in base.py — this is the bug
+that django-boilerplate-v2 had: the middleware class existed but was
+never wired. Here it is wired by default.
+
+Customise the LIMITS dict below for your own endpoints. Default limits
+target login and signup POSTs to mitigate brute force.
+"""
+
+from django.conf import settings
+from django.core.cache import cache
+from django.http import HttpResponse
+
+# (path_prefix, max_requests, window_seconds)
+LIMITS: list[tuple[str, int, int]] = [
+    ("/accounts/login/", 10, 300),       # 10 attempts / 5 min per IP
+    ("/accounts/signup/", 5, 300),       # 5 signups / 5 min per IP
+    ("/api/", 120, 60),                  # 120 API calls / minute per IP (when api=django-ninja)
+]
+
+
+class RateLimitMiddleware:
+    """Atomic rate limiter per IP using cache.incr()."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        for path_prefix, max_requests, window_seconds in LIMITS:
+            if not request.path.startswith(path_prefix):
+                continue
+
+            ip = request.META.get("REMOTE_ADDR", "0.0.0.0")
+            key = f"ratelimit:{path_prefix}:{ip}"
+
+            # Atomic increment. cache.incr() raises ValueError if the key
+            # does not exist; use cache.add() to seed it first.
+            if cache.add(key, 1, timeout=window_seconds):
+                count = 1
+            else:
+                try:
+                    count = cache.incr(key)
+                except ValueError:
+                    # Cache was flushed between add() and incr(). Reset and continue.
+                    cache.set(key, 1, timeout=window_seconds)
+                    count = 1
+
+            if count > max_requests:
+                return HttpResponse(
+                    "Too many requests. Try again later.",
+                    status=429,
+                    headers={"Retry-After": str(window_seconds)},
+                )
+
+        return self.get_response(request)

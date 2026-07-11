@@ -1,0 +1,126 @@
+"""BaseModel with soft delete functionality.
+
+Provides:
+- SoftDeleteQuerySet: queryset with soft-delete, hard-delete, restore, active, deleted filters
+- SoftDeleteManager: default manager excluding soft-deleted records
+- GlobalManager: manager including all records (including soft-deleted)
+- BaseModel: abstract model with created_at, updated_at, deleted_at fields
+"""
+
+from django.db import models
+from django.utils import timezone
+
+
+class SoftDeleteQuerySet(models.QuerySet):
+    """QuerySet that intercepts delete() to perform soft-deletes."""
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        """Soft-delete all rows in the queryset by setting deleted_at."""
+        count = self.update(deleted_at=timezone.now())
+        return count, {self.model._meta.label: count}
+
+    def hard_delete(self) -> tuple[int, dict[str, int]]:
+        """Permanently delete rows, bypassing soft-delete."""
+        return super().delete()
+
+    def restore(self) -> int:
+        """Restore all soft-deleted rows by clearing deleted_at."""
+        return self.update(deleted_at=None)
+
+    def active(self) -> "SoftDeleteQuerySet":
+        """Return only non-deleted records."""
+        return self.filter(deleted_at__isnull=True)
+
+    def deleted(self) -> "SoftDeleteQuerySet":
+        """Return only soft-deleted records."""
+        return self.filter(deleted_at__isnull=False)
+
+
+class SoftDeleteManager(models.Manager):
+    """Default manager that excludes soft-deleted records."""
+
+    def get_queryset(self) -> SoftDeleteQuerySet:
+        return SoftDeleteQuerySet(self.model, using=self._db).filter(deleted_at__isnull=True)
+
+    def active(self) -> SoftDeleteQuerySet:
+        return self.get_queryset().active()
+
+    def deleted(self) -> SoftDeleteQuerySet:
+        return self.get_queryset().deleted()
+
+    def hard_delete(self) -> tuple[int, dict[str, int]]:
+        return self.get_queryset().hard_delete()
+
+    def restore(self) -> int:
+        return self.get_queryset().restore()
+
+
+class GlobalManager(models.Manager):
+    """Manager that includes ALL records, including soft-deleted ones."""
+
+    def get_queryset(self) -> SoftDeleteQuerySet:
+        return SoftDeleteQuerySet(self.model, using=self._db)
+
+    def active(self) -> SoftDeleteQuerySet:
+        return self.get_queryset().active()
+
+    def deleted(self) -> SoftDeleteQuerySet:
+        return self.get_queryset().deleted()
+
+    def hard_delete(self) -> tuple[int, dict[str, int]]:
+        return self.get_queryset().hard_delete()
+
+    def restore(self) -> int:
+        return self.get_queryset().restore()
+
+
+class BaseModel(models.Model):
+    """Abstract base model with timestamps and soft-delete.
+
+    Usage:
+        class MyModel(BaseModel):
+            name = models.CharField(max_length=100)
+
+        obj.delete()       # soft-delete
+        obj.hard_delete()  # permanent delete
+        obj.restore()      # restore from soft-delete
+        MyModel.objects            # active only
+        MyModel.all_objects        # includes deleted
+    """
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    objects = SoftDeleteManager()
+    all_objects = GlobalManager()
+
+    class Meta:
+        abstract = True
+        indexes = [
+            models.Index(fields=["deleted_at"]),
+        ]
+
+    def delete(self, using=None, keep_parents=False) -> tuple[int, dict[str, int]]:
+        """Soft-delete: sets deleted_at instead of removing the row."""
+        if self.deleted_at is not None:
+            return 0, {}
+        self.deleted_at = timezone.now()
+        self.save(update_fields=["deleted_at", "updated_at"])
+        return 1, {self._meta.label: 1}
+
+    def hard_delete(self, using=None, keep_parents=False) -> tuple[int, dict[str, int]]:
+        """Permanently remove from DB."""
+        return super().delete(using=using, keep_parents=keep_parents)
+
+    def restore(self) -> None:
+        """Restore a soft-deleted record."""
+        if self.deleted_at is None:
+            return
+        self.deleted_at = None
+        self.save(update_fields=["deleted_at", "updated_at"])
+
+    @property
+    def is_deleted(self) -> bool:
+        """Return True if this record is soft-deleted."""
+        return self.deleted_at is not None

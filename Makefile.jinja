@@ -1,11 +1,14 @@
 # {{ project_name }} — tasks comunes
 # Targets están documentados con ## comments para self-documenting help.
 
-.PHONY: help install test check lint type-check migrate makemigrations seed clean runserver start-app
+.PHONY: help install test check lint type-check migrate makemigrations seed clean runserver start-app init-env
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+init-env: ## Initialize .env from .env.example with random SECRET_KEY + FERNET_KEY (USAGE: make init-env [FORCE=1])
+	./scripts/init_env.sh $(if $(FORCE),--force,)
 
 install: ## Install Python dependencies
 	uv sync

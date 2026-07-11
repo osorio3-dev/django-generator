@@ -69,3 +69,13 @@ urlpatterns += [
     # --- end generator-managed url includes ---
 ]
 {% endif %}
+{% set _debug_toolbar = include_debug_toolbar or 'module-debug-toolbar' in optional_modules %}
+{% if _debug_toolbar %}
+# django-debug-toolbar: OBLIGATORIO si el módulo está activo. El middleware
+# inyecta HTML con reverse('djdt:render_panel') y reverse('djdt:history_sidebar')
+# en cada respuesta HTML; sin este include, reverse() lanza NoReverseMatch
+# en cualquier TemplateView (incluido "/" si devuelve HTML).
+urlpatterns += [
+    path("__debug__/", include("debug_toolbar.urls")),
+]
+{% endif %}

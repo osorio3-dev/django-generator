@@ -128,7 +128,7 @@ PROJECT_APPS = [
 {%- if include_multitenant or 'module-multitenant' in optional_modules %}
     "apps.tenants",
 {%- endif %}
-{%- if include_multitenant and multitenant_isolation == 'schema' %}
+{%- if (include_multitenant or 'module-multitenant' in optional_modules) and multitenant_isolation == 'schema' %}
     # 'apps.tenants' already added above; django_multitenant is registered
     # separately because it's a third-party package, not a project app.
 {%- endif %}
@@ -154,7 +154,7 @@ PROJECT_APPS = [
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
-{% if include_multitenant and multitenant_isolation == 'schema' %}
+{% if (include_multitenant or 'module-multitenant' in optional_modules) and multitenant_isolation == 'schema' %}
 INSTALLED_APPS.append("django_tenants")
 
 # django-tenants configuration. The split is:
@@ -194,10 +194,10 @@ MIDDLEWARE = [
 {%- if frontend %}
     "django_htmx.middleware.HtmxMiddleware",
 {%- endif %}
-{%- if include_multitenant and multitenant_isolation == 'logical' %}
+{%- if (include_multitenant or 'module-multitenant' in optional_modules) and multitenant_isolation == 'logical' %}
     "apps.tenants.middleware.TenantMiddleware",
 {%- endif %}
-{%- if include_multitenant and multitenant_isolation == 'schema' %}
+{%- if (include_multitenant or 'module-multitenant' in optional_modules) and multitenant_isolation == 'schema' %}
     "apps.tenants.middleware.TenantSchemaMiddleware",
 {%- endif %}
 {%- if 'module-secure-endpoints' in optional_modules %}

@@ -13,7 +13,7 @@ Skipped when module-multitenant is not active.
 import pytest
 from django.test import RequestFactory
 
-MULTITENANT_ACTIVE = {% if include_multitenant %}True{% else %}False{% endif %}
+MULTITENANT_ACTIVE = {% if include_multitenant or 'module-multitenant' in optional_modules %}True{% else %}False{% endif %}
 
 
 pytestmark = pytest.mark.skipif(

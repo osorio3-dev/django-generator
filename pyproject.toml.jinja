@@ -74,7 +74,7 @@ dependencies = [
     "django-htmx>=1.19,<2.0",
     "django-vite>=3.0,<4.0",
 {%- endif %}
-{%- if include_multitenant and multitenant_isolation == 'schema' %}
+{%- if (include_multitenant or 'module-multitenant' in optional_modules) and multitenant_isolation == 'schema' %}
     "django-tenants>=3.0,<4.0",
 {%- endif %}
 {%- if 'module-realtime' in optional_modules %}

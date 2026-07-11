@@ -1,6 +1,6 @@
 """Tenant app.
 
-Only generated when ``include_multitenant=true`` in copier.yml. The shape
+Generated when ``include_multitenant=true`` or ``module-multitenant`` is listed in ``optional_modules``. The shape
 of the models, mixins, and middleware depends on ``multitenant_isolation``:
 
 - ``logical``: TenantMiddleware + TenantAwareModelMixin (single DB,

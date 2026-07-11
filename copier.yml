@@ -162,6 +162,15 @@ optional_modules:
       module-autologin-tests360, module-debug-toolbar, module-docker,
       module-precommit, module-github-ci
     Ejemplo: ["module-docker", "module-precommit", "module-github-ci"]
+  validator: >-
+    {% set valid_modules = [
+      'module-secure-endpoints', 'module-wompi', 'module-ghl', 'module-supabase',
+      'module-multitenant', 'module-realtime', 'module-django-guard',
+      'module-autologin-tests360', 'module-debug-toolbar', 'module-docker',
+      'module-precommit', 'module-github-ci'
+    ] %}
+    {% set invalid_modules = optional_modules | reject('in', valid_modules) | list %}
+    {% if invalid_modules %}optional_modules inválidos: {{ invalid_modules | join(', ') }}{% endif %}
 
 include_multitenant:
   type: bool

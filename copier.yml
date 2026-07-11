@@ -1,0 +1,230 @@
+# =============================================================================
+# django-generator — Copier template
+# =============================================================================
+# Genera un proyecto Django 6 listo para `copier update`.
+# Schema de preguntas cerrado en DESIGN.md §9. MVP scope: base + admin=unfold.
+# =============================================================================
+
+_minimum_copier_version: "9.0"
+_templates_suffix: ".jinja"
+
+# Files at the generator root that must NEVER be copied into generated projects.
+# Note: .gitignore and pyproject.toml are templates — they ARE copied to projects.
+_exclude:
+  - "copier.yml"
+  - "copier.yaml"
+  - "README.md"
+  - "DESIGN.md"
+  - "CHANGELOG.md"
+  - "scripts/**"
+  - ".agents/**"
+  - ".codegraph/**"
+  - ".git/**"
+  - ".venv/**"
+  - "__pycache__/**"
+  - "*.pyc"
+  - ".DS_Store"
+
+# -----------------------------------------------------------------------------
+# Project identity
+# -----------------------------------------------------------------------------
+project_name:
+  type: str
+  help: "Nombre legible del proyecto (ej: 'Facturación Online')"
+  placeholder: "My Django Project"
+
+project_slug:
+  type: str
+  help: "Identificador Python-safe (snake_case). Usado para carpeta raíz, paquete config, pyproject name"
+  placeholder: "my_django_project"
+  validator: "{% if not (project_slug | regex_search('^[a-z][a-z0-9_]*$')) %}Use snake_case lowercase; start with a letter.{% endif %}"
+
+author_name:
+  type: str
+  help: "Tu nombre o el del equipo (aparece en pyproject y LICENSE)"
+  default: "Gentleman Programming"
+
+python_version:
+  type: str
+  default: "3.12"
+  choices:
+    - "3.12"
+    - "3.13"
+
+django_version:
+  type: str
+  default: "6.0"
+  choices:
+    - "6.0"
+
+database:
+  type: str
+  default: "postgresql"
+  choices:
+    - "postgresql"
+    - "sqlite"
+  help: "Motor de DB recomendado en .env.example. 'sqlite' sólo para prototipos; producción exige postgresql."
+
+# -----------------------------------------------------------------------------
+# Eje API (opt-in, default OFF)
+# -----------------------------------------------------------------------------
+api:
+  type: bool
+  default: false
+  help: "¿Exponer una API HTTP? Si sí, se instala django-ninja."
+
+# -----------------------------------------------------------------------------
+# Eje Admin (opt-out, default ON)
+# -----------------------------------------------------------------------------
+admin:
+  type: bool
+  default: true
+  help: "¿Necesitás panel admin? Si sí, se instala Unfold + allauth. Si NO, se omite django.contrib.admin."
+
+admin_style:
+  type: str
+  default: "unfold"
+  choices:
+    - "unfold"
+  when: "{{ admin }}"
+  help: "Estilo del admin. Hoy sólo Unfold; mantener cerrado: el template NUNCA elige el admin de Django por defecto."
+
+# -----------------------------------------------------------------------------
+# Eje Frontend (opt-in, default OFF)
+# -----------------------------------------------------------------------------
+frontend:
+  type: bool
+  default: false
+  help: "¿Necesitás UI renderizada? Sin frontend: API-only o scripts."
+
+frontend_style:
+  type: str
+  default: "server-rendered"
+  choices:
+    - "server-rendered"
+    - "vue-spa"
+  when: "{{ frontend }}"
+  help: "server-rendered = Preline + HTMX + Alpine + cotton. vue-spa = Vue 3 + Vite + Preline + django-vite."
+
+package_manager:
+  type: str
+  default: "npm"
+  choices:
+    - "npm"
+    - "bun"
+  when: "{{ frontend }}"
+  help: "Lockfile a generar. NUNCA ambos: si 'bun' se omite package-lock.json, y viceversa."
+
+# -----------------------------------------------------------------------------
+# Fernet trigger
+# -----------------------------------------------------------------------------
+persists_sensitive_data:
+  type: bool
+  default: false
+  help: "Si tu proyecto guarda secretos o datos sensibles en DB (tokens OAuth, API keys, magic-links, PII, etc.), respondé sí. Fernet + EncryptedCharField se instalan automáticamente."
+
+# -----------------------------------------------------------------------------
+# Background jobs
+# -----------------------------------------------------------------------------
+include_jobs:
+  type: bool
+  default: false
+  help: "¿Necesitás cola de tareas (emails, webhooks, reports)? Instala django-q2 con broker ORM."
+
+jobs_backend:
+  type: str
+  default: "orm"
+  choices:
+    - "orm"
+    - "redis"
+  when: "{{ include_jobs }}"
+  help: "Broker de django-q2. 'orm' = tu DB existente, cero infra. 'redis' = requiere Redis."
+
+# -----------------------------------------------------------------------------
+# Módulos opt-in (multi-select JSON)
+# -----------------------------------------------------------------------------
+optional_modules:
+  type: json
+  default: '[]'
+  help: |
+    Lista de módulos a incluir. Opciones válidas (separadas por coma):
+      module-secure-endpoints, module-wompi, module-ghl, module-supabase,
+      module-multitenant, module-realtime, module-django-guard,
+      module-autologin-tests360, module-debug-toolbar, module-docker,
+      module-precommit, module-github-ci
+    Ejemplo: ["module-docker", "module-precommit", "module-github-ci"]
+
+include_multitenant:
+  type: bool
+  default: false
+  help: "¿SaaS multi-tenant? Activa el módulo multitenant. Equivale a listar module-multitenant en optional_modules, pero con sub-opción."
+
+multitenant_isolation:
+  type: str
+  default: "logical"
+  choices:
+    - "logical"
+    - "schema"
+  when: "{{ include_multitenant }}"
+  help: "logical = TenantMiddleware + TenantAwareModelMixin (un DB). schema = schema-per-tenant (usa django-multitenant)."
+
+# -----------------------------------------------------------------------------
+# Atajos para no obligar a escribir JSON
+# -----------------------------------------------------------------------------
+include_docker:
+  type: bool
+  default: false
+  help: "Atajo para activar module-docker."
+
+include_precommit:
+  type: bool
+  default: false
+  help: "Atajo para activar module-precommit."
+
+include_github_actions:
+  type: bool
+  default: false
+  help: "Atajo para activar module-github-ci."
+
+include_debug_toolbar:
+  type: bool
+  default: false
+  help: "Atajo para activar module-debug-toolbar (sólo recomendado en dev local)."
+
+# -----------------------------------------------------------------------------
+# E2E opcional
+# -----------------------------------------------------------------------------
+include_playwright:
+  type: bool
+  default: false
+  help: "¿Smoke tests E2E con Playwright? Recomendado sólo si frontend=vue-spa o hay flujo público crítico."
+
+# -----------------------------------------------------------------------------
+# Computed values (no prompt)
+# -----------------------------------------------------------------------------
+django_settings_module:
+  type: str
+  default: "config.settings"
+  when: false
+  help: "Ruta al paquete de settings. Default: 'config.settings' (el slug del proyecto es el nombre de la carpeta, no del paquete Python)."
+
+# -----------------------------------------------------------------------------
+# Confirmación
+# -----------------------------------------------------------------------------
+_confirm:
+  type: bool
+  default: true
+  help: "Confirmar antes de generar."
+
+_message_after_copy: |
+  Proyecto "{{ project_slug }}" generado.
+
+  Próximos pasos:
+    1. cd {{ project_slug }}
+    2. cp .env.example .env  (y editar SECRET_KEY, DATABASE_URL, etc.)
+    3. uv sync  (o pip install -e .)
+    4. python manage.py migrate
+    5. python manage.py runserver
+
+  Para re-aplicar el template más adelante:
+    copier update

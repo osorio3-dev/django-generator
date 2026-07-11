@@ -1,0 +1,7 @@
+"""Payments app.
+
+Only generated when ``module-wompi`` is selected. Houses the per-provider
+sub-apps (``wompi``, future ``stripe``, etc.). The top-level app is
+intentionally minimal — each provider is its own sub-app.
+"""
+default_app_config = "apps.payments.apps.PaymentsConfig"

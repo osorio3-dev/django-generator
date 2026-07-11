@@ -1,0 +1,135 @@
+"""Wompi integration — provider-specific config and state.
+
+When ``multitenant`` is active, ``WompiConfig`` is tenant-scoped (via
+``TenantAwareModelMixin``). When not, it falls back to a single config per
+environment. ``private_key``, ``events_secret`` and ``integrity_secret`` are
+``EncryptedCharField`` because they must never live in plaintext in the DB.
+"""
+
+from __future__ import annotations
+
+from django.db import models
+
+from apps.core.models.base import BaseModel
+{% if persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules %}
+from apps.core.models.fields import EncryptedCharField
+{%- endif %}
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+from apps.tenants.mixins import TenantAwareModelMixin
+from apps.tenants.models import Tenant
+{%- endif %}
+
+
+class WompiEnvironment(models.TextChoices):
+    SANDBOX = "SANDBOX", "Sandbox"
+    LIVE = "LIVE", "Producción"
+
+
+class WompiRegion(models.TextChoices):
+    COLOMBIA = "CO", "Colombia"
+    EL_SALVADOR = "SV", "El Salvador"
+    MEXICO = "MX", "México"
+    PERU = "PE", "Perú"
+
+
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+class WompiConfig(TenantAwareModelMixin, BaseModel):
+    """Per-tenant Wompi credentials.
+
+    Each tenant keeps its own set of keys; ``TenantAwareModelMixin``
+    guarantees the default manager filters by current_tenant.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="wompi_configs"
+    )
+{%- else %}
+class WompiConfig(BaseModel):
+    """Single-config Wompi credentials (no multitenant)."""
+
+    name = models.CharField(max_length=200, default="default")
+{%- endif %}
+    public_key = models.CharField(max_length=255)
+{% if persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules %}
+    private_key = EncryptedCharField(max_length=512)
+    events_secret = EncryptedCharField(max_length=512, blank=True, default="")
+    integrity_secret = EncryptedCharField(max_length=512, blank=True, default="")
+{%- else %}
+    # Fernet not active in this project. Secrets are stored as plain CharFields.
+    # NOT recommended for production — re-enable by activating Fernet or any of
+    # its triggering modules.
+    private_key = models.CharField(max_length=512)
+    events_secret = models.CharField(max_length=512, blank=True, default="")
+    integrity_secret = models.CharField(max_length=512, blank=True, default="")
+{%- endif %}
+    environment = models.CharField(
+        max_length=20,
+        choices=WompiEnvironment.choices,
+        default=WompiEnvironment.SANDBOX,
+    )
+    region = models.CharField(
+        max_length=2, choices=WompiRegion.choices, default=WompiRegion.COLOMBIA
+    )
+    is_valid = models.BooleanField(default=False)
+    validated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+        unique_together = [("tenant", "environment")]
+{%- else %}
+        verbose_name = "Wompi configuration"
+        verbose_name_plural = "Wompi configurations"
+{%- endif %}
+
+    def __str__(self) -> str:
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+        return f"Wompi {self.environment} - tenant={self.tenant_id}"
+{%- else %}
+        return f"Wompi {self.environment} - {self.name}"
+{%- endif %}
+
+    @property
+    def events_secret_set(self) -> bool:
+        return bool(self.events_secret)
+
+    @property
+    def integrity_secret_set(self) -> bool:
+        return bool(self.integrity_secret)
+
+
+class WompiTransaction(BaseModel):
+    """State-machine record of a Wompi transaction.
+
+    Stores the externally-meaningful ID and the lifecycle events we receive
+    from Wompi webhooks. The ``state`` field is denormalized for fast queries.
+    """
+
+    STATE_PENDING = "PENDING"
+    STATE_APPROVED = "APPROVED"
+    STATE_DECLINED = "DECLINED"
+    STATE_VOIDED = "VOIDED"
+    STATE_ERROR = "ERROR"
+    STATE_CHOICES = [
+        (STATE_PENDING, "Pending"),
+        (STATE_APPROVED, "Approved"),
+        (STATE_DECLINED, "Declined"),
+        (STATE_VOIDED, "Voided"),
+        (STATE_ERROR, "Error"),
+    ]
+
+    wompi_id = models.CharField(max_length=64, unique=True)
+    reference = models.CharField(max_length=128, db_index=True)
+    amount_in_cents = models.BigIntegerField()
+    currency = models.CharField(max_length=8, default="COP")
+    state = models.CharField(max_length=16, choices=STATE_CHOICES, default=STATE_PENDING)
+    payment_method = models.CharField(max_length=32, blank=True, default="")
+    raw_response = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["state", "created_at"])]
+        verbose_name = "Wompi transaction"
+        verbose_name_plural = "Wompi transactions"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.wompi_id} {self.state} {self.amount_in_cents}{self.currency}"

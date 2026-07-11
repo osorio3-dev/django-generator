@@ -1,0 +1,132 @@
+"""Wompi API endpoints (Django Ninja).
+
+Mounted under ``/api/wompi/`` when ``api=true`` AND ``module-wompi`` are
+both selected. Endpoint paths:
+
+- POST /api/wompi/collect/         — start a payment.
+- GET  /api/wompi/transactions/<id>/ — fetch status.
+- POST /api/wompi/webhook/         — receive Wompi events (signature-verified).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from django.http import HttpRequest, JsonResponse
+from ninja import Router
+
+from apps.payments.wompi.models import WompiConfig, WompiTransaction
+from apps.payments.wompi.services import WompiApiClient, WompiSignatureVerifier
+
+router = Router()
+
+
+@router.post("/collect/")
+def collect_payment(request: HttpRequest, payload: dict[str, Any]):
+    """Create a Wompi transaction.
+
+    Body: ``{"amount_in_cents": int, "currency": "COP", "reference": str,
+    "payment_method": str, "customer_email": str}``
+    """
+    config = _resolve_config(request)
+    client = WompiApiClient(
+        public_key=config.public_key,
+        private_key=config.private_key,
+        environment=config.environment,
+        region=config.region,
+        integrity_secret=config.integrity_secret,
+    )
+    # Compute the integrity signature.
+    signature = client.sign_transaction(
+        reference=payload["reference"],
+        amount_in_cents=payload["amount_in_cents"],
+        currency=payload.get("currency", "COP"),
+    )
+    payload = {**payload, "signature": signature}
+
+    response = client.create_transaction(payload)
+    data = response.get("data", {})
+    tx = WompiTransaction.all_objects.create(
+        wompi_id=data.get("id", ""),
+        reference=payload["reference"],
+        amount_in_cents=payload["amount_in_cents"],
+        currency=payload.get("currency", "COP"),
+        state=data.get("status", WompiTransaction.STATE_PENDING),
+        payment_method=payload.get("payment_method", ""),
+        raw_response=response,
+    )
+    return {"id": tx.wompi_id, "status": tx.state, "reference": tx.reference}
+
+
+@router.get("/transactions/<str:transaction_id>/")
+def payment_status(request: HttpRequest, transaction_id: str):
+    """Fetch a transaction's current status from Wompi."""
+    config = _resolve_config(request)
+    client = WompiApiClient(
+        public_key=config.public_key,
+        private_key=config.private_key,
+        environment=config.environment,
+        region=config.region,
+        integrity_secret=config.integrity_secret,
+    )
+    data = client.get_transaction(transaction_id)
+    return data.get("data", {})
+
+
+@router.post("/webhook/")
+def wompi_webhook(request: HttpRequest):
+    """Receive Wompi webhook events. Signature-verified via HMAC.
+
+    Returns 200 on a duplicate event (idempotent at the application layer
+    via the WompiTransaction uniqueness on ``wompi_id``).
+    """
+    payload = request.data if hasattr(request, "data") else _json_body(request)
+    config = _resolve_config(request)
+    verifier = WompiSignatureVerifier(config)
+    if not verifier.verify(payload):
+        return JsonResponse({"detail": "Invalid signature."}, status=401)
+
+    data = payload.get("data", {})
+    tx_data = data.get("transaction", {})
+    wompi_id = tx_data.get("id", "")
+    if not wompi_id:
+        return JsonResponse({"detail": "Missing transaction id."}, status=400)
+
+    WompiTransaction.all_objects.update_or_create(
+        wompi_id=wompi_id,
+        defaults={
+            "reference": tx_data.get("reference", ""),
+            "amount_in_cents": tx_data.get("amount_in_cents", 0),
+            "currency": tx_data.get("currency", "COP"),
+            "state": tx_data.get("status", WompiTransaction.STATE_PENDING),
+            "payment_method": tx_data.get("payment_method_type", ""),
+            "raw_response": payload,
+        },
+    )
+    return JsonResponse({"ok": True})
+
+
+def _resolve_config(request: HttpRequest) -> WompiConfig:
+    """Pick the right WompiConfig for the current request.
+
+    Multitenant: filter by ``request.tenant``. Otherwise: pick the first
+    SANDBOX / LIVE matching the env default.
+    """
+    qs = WompiConfig.all_objects.all()
+    tenant = getattr(request, "tenant", None)
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
+    config = qs.filter(environment="LIVE").first() or qs.filter(environment="SANDBOX").first()
+    if config is None:
+        raise WompiApiError("No WompiConfig is configured.")
+    return config
+
+
+def _json_body(request: HttpRequest) -> dict:
+    """Fallback body parser when Ninja's middleware hasn't run."""
+    import json
+
+    try:
+        return json.loads(request.body)
+    except (ValueError, AttributeError):
+        return {}

@@ -1,0 +1,38 @@
+"""Wompi admin (Unfold)."""
+
+from django.contrib import admin
+from unfold.admin import ModelAdmin
+
+from apps.payments.wompi.models import WompiConfig, WompiTransaction
+
+
+@admin.register(WompiConfig)
+class WompiConfigAdmin(ModelAdmin):
+    list_display = (
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+        "tenant",
+{%- endif %}
+        "environment", "region", "is_valid", "validated_at",
+    )
+    list_filter = ("environment", "region", "is_valid")
+    search_fields = ("public_key", {% if include_multitenant and multitenant_isolation == 'logical' %}"tenant__slug"{% endif %})
+    # Anti-pattern rule: encrypted fields are NEVER shown in plaintext in admin.
+    # We override get_form to mark them as readonly or exclude them entirely.
+    exclude = ("private_key", "events_secret", "integrity_secret")
+    readonly_fields = ("is_valid", "validated_at")
+
+    def has_add_permission(self, request):
+        # Configs should be created programmatically (one per tenant).
+        return True
+
+
+@admin.register(WompiTransaction)
+class WompiTransactionAdmin(ModelAdmin):
+    list_display = ("wompi_id", "reference", "state", "amount_in_cents", "currency", "created_at")
+    list_filter = ("state", "currency", "payment_method")
+    search_fields = ("wompi_id", "reference")
+    readonly_fields = tuple(
+        f.name for f in WompiTransaction._meta.fields
+    )
+    ordering = ("-created_at",)
+    list_per_page = 50

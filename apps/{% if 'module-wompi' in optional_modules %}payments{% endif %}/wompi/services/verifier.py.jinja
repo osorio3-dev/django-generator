@@ -1,0 +1,44 @@
+"""Wompi webhook signature verification.
+
+Built on top of the always-available HMAC verifier in
+``apps.core.utils.crypto``. Adapts the contract:
+
+- Reads the secret from ``WompiConfig.events_secret``.
+- Logs and returns False when the secret is empty (production should never
+  reach that path — ``WompiConfig.events_secret_set`` is checked first).
+"""
+
+from __future__ import annotations
+
+import logging
+
+from apps.core.utils.crypto import HMAC_SHA256Verifier
+
+logger = logging.getLogger(__name__)
+
+
+class WompiSignatureVerifier:
+    """Adapter around the shared HMAC_SHA256Verifier.
+
+    Usage::
+
+        verifier = WompiSignatureVerifier(wompi_config)
+        is_valid = verifier.verify(request_payload)
+    """
+
+    def __init__(self, wompi_config) -> None:
+        self.config = wompi_config
+        secret = wompi_config.events_secret
+        if not secret:
+            self._inner = None
+            logger.warning(
+                "WompiConfig has no events_secret configured — webhook verification will fail."
+            )
+        else:
+            self._inner = HMAC_SHA256Verifier(secret)
+
+    def verify(self, payload: dict) -> bool:
+        """Return True iff the Wompi signature on the payload is valid."""
+        if self._inner is None:
+            return False
+        return self._inner.verify(payload)

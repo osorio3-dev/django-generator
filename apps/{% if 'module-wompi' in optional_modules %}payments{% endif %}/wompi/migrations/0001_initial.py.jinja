@@ -1,0 +1,85 @@
+"""Initial migration for the wompi app."""
+
+from django.db import migrations, models
+{% if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) %}
+
+
+# EncryptedCharField's underlying column type is TextField (no DB max_length
+# enforcement). The makemigrations output below is hand-written to match the
+# generated field type.
+{%- endif %}
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+        ("tenants", "0001_initial"),
+{%- endif %}
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name="WompiConfig",
+            fields=[
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("deleted_at", models.DateTimeField(blank=True, editable=False, null=True)),
+                ("public_key", models.CharField(max_length=255)),
+{% if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) %}
+                ("private_key", models.TextField(blank=True, default="")),
+                ("events_secret", models.TextField(blank=True, default="")),
+                ("integrity_secret", models.TextField(blank=True, default="")),
+{%- else %}
+                ("private_key", models.CharField(max_length=512)),
+                ("events_secret", models.CharField(blank=True, default="", max_length=512)),
+                ("integrity_secret", models.CharField(blank=True, default="", max_length=512)),
+{%- endif %}
+                ("environment", models.CharField(choices=[("SANDBOX", "Sandbox"), ("LIVE", "Producción")], default="SANDBOX", max_length=20)),
+                ("region", models.CharField(choices=[("CO", "Colombia"), ("SV", "El Salvador"), ("MX", "México"), ("PE", "Perú")], default="CO", max_length=2)),
+                ("is_valid", models.BooleanField(default=False)),
+                ("validated_at", models.DateTimeField(blank=True, null=True)),
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+                ("tenant", models.ForeignKey(on_delete=models.deletion.CASCADE, related_name="wompi_configs", to="tenants.tenant")),
+{%- else %}
+                ("name", models.CharField(default="default", max_length=200)),
+{%- endif %}
+            ],
+            options={
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+                "unique_together": {("tenant", "environment")},
+{%- else %}
+                "verbose_name": "Wompi configuration",
+                "verbose_name_plural": "Wompi configurations",
+{%- endif %}
+            },
+        ),
+        migrations.CreateModel(
+            name="WompiTransaction",
+            fields=[
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("deleted_at", models.DateTimeField(blank=True, editable=False, null=True)),
+                ("wompi_id", models.CharField(max_length=64, unique=True)),
+                ("reference", models.CharField(db_index=True, max_length=128)),
+                ("amount_in_cents", models.BigIntegerField()),
+                ("currency", models.CharField(default="COP", max_length=8)),
+                ("state", models.CharField(choices=[("PENDING", "Pending"), ("APPROVED", "Approved"), ("DECLINED", "Declined"), ("VOIDED", "Voided"), ("ERROR", "Error")], default="PENDING", max_length=16)),
+                ("payment_method", models.CharField(blank=True, default="", max_length=32)),
+                ("raw_response", models.JSONField(blank=True, default=dict)),
+            ],
+            options={
+                "verbose_name": "Wompi transaction",
+                "verbose_name_plural": "Wompi transactions",
+                "ordering": ["-created_at"],
+            },
+        ),
+        migrations.AddIndex(
+            model_name="wompitransaction",
+            index=models.Index(fields=["state", "created_at"], name="wompi_wompi_state_idx"),
+        ),
+    ]

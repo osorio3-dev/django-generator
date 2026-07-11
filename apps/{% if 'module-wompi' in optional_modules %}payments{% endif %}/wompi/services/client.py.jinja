@@ -1,0 +1,138 @@
+"""Wompi API client.
+
+Adapted from inpacto-pagos-ghl-universum. Differences:
+- ``region`` choices are now an enum (CO, SV, MX, PE).
+- ``httpx`` is used directly (no SDK dependency).
+- ``sign_transaction`` matches Wompi Colombia's documented SHA256 contract.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Any
+
+import httpx
+
+
+class WompiApiError(Exception):
+    """Raised when the Wompi API returns a non-2xx or times out."""
+
+
+class WompiApiClient:
+    """HTTP client for the Wompi acceptance-tokens + transactions API."""
+
+    BASE_URLS = {
+        "CO": {"SANDBOX": "https://sandbox.wompi.co", "LIVE": "https://production.wompi.co"},
+        "SV": {"SANDBOX": "https://sandbox.wompi.sv", "LIVE": "https://production.wompi.sv"},
+        "MX": {"SANDBOX": "https://sandbox.wompi.mx", "LIVE": "https://production.wompi.mx"},
+        "PE": {"SANDBOX": "https://sandbox.wompi.pe", "LIVE": "https://production.wompi.pe"},
+    }
+
+    def __init__(
+        self,
+        public_key: str,
+        private_key: str,
+        environment: str = "SANDBOX",
+        region: str = "CO",
+        integrity_secret: str = "",
+        *,
+        timeout: float = 15.0,
+    ) -> None:
+        self.public_key = public_key
+        self.private_key = private_key
+        self.environment = environment
+        self.region = region
+        self.integrity_secret = integrity_secret
+        self._timeout = timeout
+        region_urls = self.BASE_URLS.get(region, self.BASE_URLS["CO"])
+        self.base_url = region_urls.get(environment, region_urls["SANDBOX"])
+
+    # ── Credentials ──────────────────────────────────────────────────────
+
+    def validate_credentials(self) -> bool:
+        """Best-effort credential check via the public merchants endpoint."""
+        url = f"{self.base_url}/v1/merchants/{self.public_key}"
+        try:
+            r = httpx.get(url, timeout=self._timeout)
+            return r.status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    # ── Integrity signature (Colombia) ───────────────────────────────────
+
+    def sign_transaction(
+        self, reference: str, amount_in_cents: int, currency: str = "COP"
+    ) -> str:
+        """Wompi Colombia integrity SHA256: ``ref + amount + currency + secret``."""
+        if not self.integrity_secret:
+            raise WompiApiError(
+                "integrity_secret is required to sign transactions. "
+                "Configure it in the WompiConfig admin."
+            )
+        payload = f"{reference}{amount_in_cents}{currency}{self.integrity_secret}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    # ── Acceptance tokens ────────────────────────────────────────────────
+
+    def get_acceptance_tokens(self) -> tuple[str | None, str | None]:
+        """Return ``(acceptance_token, accept_personal_auth)``.
+
+        - CO: both come from the merchants endpoint.
+        - SV / MX / PE: just the first one.
+        """
+        if self.region == "CO":
+            try:
+                r = httpx.get(
+                    f"{self.base_url}/v1/merchants/{self.public_key}",
+                    timeout=self._timeout,
+                )
+                r.raise_for_status()
+                data = r.json().get("data", {})
+                return (
+                    data.get("presigned_acceptance", {}).get("acceptance_token"),
+                    data.get("presigned_personal_data_auth", {}).get("acceptance_token"),
+                )
+            except httpx.HTTPError:
+                return (None, None)
+        # Other regions
+        try:
+            r = httpx.get(
+                f"{self.base_url}/v1/acceptance-tokens",
+                params={"public_key": self.public_key},
+                timeout=self._timeout,
+            )
+            r.raise_for_status()
+            return (r.json().get("data", {}).get("acceptance_token"), None)
+        except httpx.HTTPError:
+            return (None, None)
+
+    # ── Transactions ─────────────────────────────────────────────────────
+
+    def create_transaction(self, payload: dict[str, Any]) -> dict:
+        """Create a transaction. Requires the private key as Bearer."""
+        url = f"{self.base_url}/v1/transactions"
+        headers = {"Authorization": f"Bearer {self.private_key}"}
+        try:
+            r = httpx.post(url, json=payload, headers=headers, timeout=self._timeout)
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise WompiApiError(f"HTTP {e.response.status_code}: {e.response.text}") from e
+        except httpx.HTTPError as e:
+            raise WompiApiError(str(e)) from e
+        return r.json()
+
+    def get_transaction(self, transaction_id: str) -> dict:
+        """Fetch a transaction by ID (uses public key for auth)."""
+        url = f"{self.base_url}/v1/transactions/{transaction_id}"
+        headers = {"Authorization": f"Bearer {self.public_key}"}
+        r = httpx.get(url, headers=headers, timeout=self._timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def void_transaction(self, transaction_id: str) -> dict:
+        """Annull a CARD transaction. Requires the private key."""
+        url = f"{self.base_url}/v1/transactions/{transaction_id}/void"
+        headers = {"Authorization": f"Bearer {self.private_key}"}
+        r = httpx.post(url, headers=headers, timeout=self._timeout)
+        r.raise_for_status()
+        return r.json()

@@ -1,0 +1,148 @@
+"""Tests for module-wompi.
+
+Asserts:
+- WompiApiClient.sign_transaction matches Wompi Colombia's documented contract.
+- WompiApiClient picks the correct base URL per region + environment.
+- WompiSignatureVerifier rejects payloads without events_secret.
+- WompiSignatureVerifier rejects tampered signatures.
+- WompiSignatureVerifier accepts correct signatures.
+- WompiConfig model stores encrypted secrets via EncryptedCharField when
+  Fernet is active.
+
+Skipped when module-wompi is not active.
+"""
+
+import hashlib
+import hmac
+from unittest.mock import MagicMock
+
+import pytest
+
+WOMPI_ACTIVE = {% if 'module-wompi' in optional_modules %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not WOMPI_ACTIVE,
+    reason="module-wompi not active in this project",
+)
+
+
+# ── WompiApiClient ──────────────────────────────────────────────────────
+
+
+def test_wompi_client_picks_correct_base_url():
+    from apps.payments.wompi.services.client import WompiApiClient
+
+    co_sandbox = WompiApiClient("pk", "sk", environment="SANDBOX", region="CO")
+    co_live = WompiApiClient("pk", "sk", environment="LIVE", region="CO")
+    sv_live = WompiApiClient("pk", "sk", environment="LIVE", region="SV")
+
+    assert co_sandbox.base_url == "https://sandbox.wompi.co"
+    assert co_live.base_url == "https://production.wompi.co"
+    assert sv_live.base_url == "https://production.wompi.sv"
+
+
+def test_wompi_client_sign_transaction_matches_documented_contract():
+    """Wompi CO: SHA256(reference + amount_in_cents + currency + integrity_secret)."""
+    from apps.payments.wompi.services.client import WompiApiClient, WompiApiError
+
+    client = WompiApiClient(
+        "pk", "sk",
+        environment="SANDBOX",
+        region="CO",
+        integrity_secret="integrity-abc",
+    )
+    signature = client.sign_transaction("ref-1", 150000, "COP")
+    expected = hashlib.sha256(b"ref-1150000COPintegrity-abc").hexdigest()
+    assert signature == expected
+
+
+def test_wompi_client_sign_transaction_requires_secret():
+    from apps.payments.wompi.services.client import WompiApiClient, WompiApiError
+
+    client = WompiApiClient("pk", "sk", integrity_secret="")
+    with pytest.raises(WompiApiError):
+        client.sign_transaction("ref-1", 100, "COP")
+
+
+# ── WompiSignatureVerifier ──────────────────────────────────────────────
+
+
+def _make_config(events_secret: str) -> MagicMock:
+    cfg = MagicMock()
+    cfg.events_secret = events_secret
+    return cfg
+
+
+def test_wompi_verifier_rejects_without_secret():
+    from apps.payments.wompi.services.verifier import WompiSignatureVerifier
+
+    verifier = WompiSignatureVerifier(_make_config(""))
+    assert verifier.verify({"signature": {"properties": [], "checksum": "anything"}}) is False
+
+
+def test_wompi_verifier_rejects_tampered_signature():
+    from apps.payments.wompi.services.verifier import WompiSignatureVerifier
+
+    payload = {
+        "data": {"transaction": {"id": "TX-1", "status": "APPROVED"}},
+        "signature": {
+            "properties": ["data.transaction.id", "data.transaction.status"],
+            "checksum": "0" * 64,
+        },
+    }
+    verifier = WompiSignatureVerifier(_make_config("secret"))
+    assert verifier.verify(payload) is False
+
+
+def test_wompi_verifier_accepts_correct_signature():
+    from apps.payments.wompi.services.verifier import WompiSignatureVerifier
+
+    secret = "secret"
+    payload = {
+        "data": {"transaction": {"id": "TX-1", "status": "APPROVED"}},
+        "signature": {
+            "properties": ["data.transaction.id", "data.transaction.status"],
+            "checksum": hmac.new(
+                secret.encode(), b"TX-1APPROVED", hashlib.sha256
+            ).hexdigest(),
+        },
+    }
+    verifier = WompiSignatureVerifier(_make_config(secret))
+    assert verifier.verify(payload) is True
+
+
+# ── WompiConfig + EncryptedCharField integration ────────────────────────
+
+
+@pytest.mark.django_db
+def test_wompi_config_stores_encrypted_secret(settings):
+    """Fernet must be active when Wompi is selected, so secrets are encrypted at rest."""
+    from apps.payments.wompi.models import WompiConfig
+
+    if not {{ 'True' if (persists_sensitive_data or 'module-secure-endpoints' in optional_modules or 'module-wompi' in optional_modules or 'module-ghl' in optional_modules or 'module-supabase' in optional_modules or 'module-autologin-tests360' in optional_modules) else 'False' }}:
+        pytest.skip("Fernet not active — secrets stored as plain CharField.")
+{% if include_multitenant and multitenant_isolation == 'logical' %}
+    from apps.tenants.models import Tenant
+
+    tenant = Tenant.all_objects.create(name="Acme", slug="acme", location_id="loc-acme")
+{%- endif %}
+
+    cfg = WompiConfig.all_objects.create(
+{%- if include_multitenant and multitenant_isolation == 'logical' %}
+        tenant=tenant,
+{%- endif %}
+{% if not (include_multitenant and multitenant_isolation == 'logical') %}
+        name="test",
+{%- endif %}
+        public_key="pub_test",
+        private_key="sk_test_xxx",
+        events_secret="evt_test_xxx",
+        integrity_secret="int_test_xxx",
+    )
+    cfg.refresh_from_db()
+
+    # The Fernet cipher always starts with "gAAAAA". Plaintext columns never do.
+    assert cfg.private_key.startswith("gAAAAA")
+    assert cfg.events_secret.startswith("gAAAAA")
+    assert cfg.integrity_secret.startswith("gAAAAA")

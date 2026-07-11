@@ -3,9 +3,8 @@ name: frontend-patterns
 description: >
   TRIGGER: trabajando en un proyecto generado con frontend=server-rendered
   (el default cuando frontend=true), en templates/cotton/**/*.html, en
-  templates/base.html.jinja, en static/css/main.css, en apps/web/vite/entry.js
-  (cuando es server-rendered este archivo es un stub — el entry real vive en
-  static/js/main.js), en apps/web/urls.py / views/landing.py / views/dashboard.py,
+  templates/base.html.jinja, en apps/web/vite/entry.js,
+  apps/web/vite/style.css, en apps/web/urls.py / views/landing.py / views/dashboard.py,
   o cuando el usuario toca Preline, HTMX (hx-get, hx-post, hx-target, hx-swap),
   Alpine.js (x-data, x-show, x-on:click), django-cotton (<c-ui.button>),
   django-vite (vite_asset, vite_hmr_client), Vite 6, o Tailwind v4 CSS-first.
@@ -25,7 +24,7 @@ Estás en un proyecto generado por este generator con `frontend=true` y
 `frontend_style=server-rendered`. Tocás alguno de estos archivos:
 
 - `templates/base.html.jinja` o `templates/cotton/**/*.html`
-- `static/css/main.css` y `static/js/main.js`
+- `apps/web/vite/entry.js` y `apps/web/vite/style.css`
 - `apps/web/urls.py.jinja` / `apps/web/views/{landing,dashboard}.py.jinja`
 - `package.json` (Preline, HTMX, Alpine, Vite, Tailwind v4)
 - `vite.config.ts.jinja` (cuando `frontend_style=server-rendered`)
@@ -38,8 +37,8 @@ Estás en un proyecto generado por este generator con `frontend=true` y
 - **Si `frontend=vue-spa`**: usá `vue-spa-patterns` para Vue 3 +
   Composition API + vue-router + .vue SFCs. Algo de Vite/django-vite/Tailwind
   v4 es común pero las templates NO son django-cotton, NO hay HTMX/Alpine en
-  el cliente. El entry JS vive en `apps/web/vite/entry.js` (no en
-  `static/js/main.js`).
+  el cliente. El entry JS vive en `apps/web/vue/main.js` (no en
+  `apps/web/vite/entry.js`).
 - **Si estás en admin (`unfold`)**: ver `unfold-patterns`. Los assets de Unfold
   (`STYLES`, `SCRIPTS` en `unfold.py.jinja`) cargan `css/dist.css` /
   `js/preline.js` desde `static/dist/`, pero el frontend público NO entra acá.
@@ -74,19 +73,18 @@ templates/
     ├── layout/                        # navbar, sidebar, container
     └── forms/                         # field, label, error
 
-static/
-├── css/main.css                       # CSS entry de Vite (NO .jinja)
-└── js/main.js                         # JS entry de Vite (NO .jinja)
+apps/web/vite/
+├── entry.js                            # JS entry de Vite
+└── style.css                           # CSS entry de Vite
 
-vite.config.ts.jinja                   # input -> static/js/main.js
+vite.config.ts.jinja                    # input -> apps/web/vite/entry.js
                                        # plugins -> tailwindcss
 package.json.jinja                     # scripts: dev/build, deps: preline + htmx.org + alpinejs
 ```
 
-El entry JS vive SIEMPRE en `static/js/main.js`. **NO** modificar
-`apps/web/vite/entry.js.jinja` cuando `frontend_style=server-rendered`: ese
-archivo es un stub generado por Copier para mantener la estructura uniforme,
-el Vite config apunta a `static/js/main.js`.
+El entry JS vive SIEMPRE en `apps/web/vite/entry.js`, y ese entry importa
+`apps/web/vite/style.css`. **NO** crear una segunda entrada en `static/js/` o
+`static/css/`: server-rendered usa un solo entry point bajo `apps/web/vite/`.
 
 ```html
 <!-- templates/base.html.jinja (extracto) -->
@@ -96,7 +94,7 @@ el Vite config apunta a `static/js/main.js`.
 <head>
   ...
   {% vite_hmr_client %}        {# inyecta HMR solo si DEBUG=True #}
-  {% vite_asset 'static/js/main.js' %}
+  {% vite_asset 'apps/web/vite/entry.js' %}
   ...
 </head>
 <body>
@@ -118,7 +116,7 @@ Preline se importa vía npm y provee componentes HTML + Tailwind v4 + plugins JS
 El generator pre-configura el CSS y la inicialización:
 
 ```css
-/* static/css/main.css */
+/* apps/web/vite/style.css */
 @import "tailwindcss";
 @import "preline/preline.css";
 
@@ -130,7 +128,7 @@ El generator pre-configura el CSS y la inicialización:
 }
 ```
 
-Inicialización en `static/js/main.js`:
+Inicialización en `apps/web/vite/entry.js`:
 
 ```javascript
 import 'preline';
@@ -383,7 +381,7 @@ export default defineConfig({
     manifest: 'manifest.json',
     outDir: 'static/dist',
     emptyOutDir: true,
-    rollupOptions: { input: resolve(__dirname, 'static/js/main.js') },
+    rollupOptions: { input: resolve(__dirname, 'apps/web/vite/entry.js') },
   },
   server: { host: '0.0.0.0', port: 5173, strictPort: true },
 });
@@ -395,13 +393,12 @@ Workflow:
   `request.DEBUG=True` → django-vite sirve desde ese dev server.
 - `npm run build` / `bun run build` → output en `static/dist/` con
   `manifest.json` + assets. `DEBUG=False` → django-vite lee el manifest.
-- `dist/` está gitignorado. Solo se versiona el source (`static/css/`,
-  `static/js/`).
+- `dist/` está gitignorado. Solo se versiona el source (`apps/web/vite/`).
 
 ## 8. Tailwind v4 — CSS-first, sin `tailwind.config.js`
 
 Tailwind v4 NO usa `tailwind.config.js`. Toda la config vive en bloques
-`@theme` dentro de `static/css/main.css`:
+`@theme` dentro de `apps/web/vite/style.css`:
 
 ```css
 @import "tailwindcss";
@@ -436,14 +433,14 @@ utilidades de Tailwind. NO crear un `tailwind.config.js` adicional.
 | Usar `inertia-django` / `@inertiajs/vue3` | django-boilerplate-v2 | El generator NO hace SPA-inertia | Server-rendered se mantiene server-side; SPA Vue es standalone (vue-spa-patterns) |
 | Crear `templates/cotton/{inputs,buttons,modals}/` por tipo | boilerplates viejos | El grouping del generator es por dominio | `templates/cotton/<domain>/<component>.html` |
 | Importar `from "primevue/button"` o similar | django-boilerplate-v2 | PrimeVue v4 rompe imports; fuera de scope | Para UI, Preline + Tailwind v4. Para Vue, ver `vue-spa-patterns` |
-| Crear `static/js/components/` con Vue/React files | boilerplates viejos | Esto NO es server-rendered | UI server-rendered = algodón + HTML. Si necesitás Vue, frontend_style=vue-spa |
+| Crear `static/js/components/` con Vue/React files | boilerplates viejos | Esto NO es server-rendered | UI server-rendered = cotton + HTML. Si necesitás Vue, frontend_style=vue-spa |
 | `<c-ui.button variant="danger" id="123">` con `id` hardcodeado | tests-360 | IDs duplicados rompen aria + scripts | `<c-ui.button id="btn-create-invoice">` con nombres semánticos |
-| `{% vite_asset 'apps/web/vite/entry.js' %}` en server-rendered | mal port del template | Cuando server-rendered, el entry es `static/js/main.js` | `{% vite_asset 'static/js/main.js' %}` — el path está hardcodeado en `base.html.jinja` |
+| `{% vite_asset 'static/js/main.js' %}` en server-rendered | entry legacy | Cuando server-rendered, el entry único es `apps/web/vite/entry.js` | `{% vite_asset 'apps/web/vite/entry.js' %}` — el path coincide con `vite.config.ts` |
 | `package-lock.json` + `bun.lockb` coexistiendo | inpacto-ghl-integrations, b2bcg | Conflictos de resolución | Jinja conditional: `package_manager=...` ⇒ sólo uno |
 | Crear `tasks/` directory en raíz | boilerplates viejos | Rompe convención `apps/<app>/tasks.py` | Generator NO crea `tasks/` raíz |
 | `HSStaticMethods.autoInit()` sin listener `htmx:afterSwap` | tests-360 | Modals Preline en respuestas HTMX no abren | Ver §2 |
-| Inicializar Preline desde `apps/web/vite/entry.js` cuando frontend_style=server-rendered | mal port | El entry real es `static/js/main.js` | `entry.js.jinja` es un stub en server-rendered |
-| Usar `<script src="{% static 'js/preline.js' %}">` con path customizado | b2bcg | django-vite ya emite el script tag correcto | `{% vite_asset 'static/js/main.js' %}` — Preline se importa adentro |
+| Crear una segunda entrada Vite en `static/js/` o `static/css/` | mal port | Duplica el pipeline y desincroniza django-vite | Mantener JS/CSS source bajo `apps/web/vite/` |
+| Usar `<script src="{% static 'js/preline.js' %}">` con path customizado | b2bcg | django-vite ya emite el script tag correcto | `{% vite_asset 'apps/web/vite/entry.js' %}` — Preline se importa adentro |
 
 ---
 

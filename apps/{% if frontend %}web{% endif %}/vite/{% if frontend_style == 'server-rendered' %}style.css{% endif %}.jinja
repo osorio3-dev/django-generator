@@ -1,13 +1,5 @@
-/* Tailwind v4 CSS-first entry — server-rendered projects only.
- *
- * Vite bundles this file into static/dist/main.css. Django collects it via
- * WhiteNoise in production. In dev (DEBUG=True) Vite's dev server serves
- * the file directly with HMR.
- *
- * Frontend style: server-rendered (Preline + HTMX + Alpine + cotton).
- * For vue-spa, the entry is apps/web/vue/main.js (no Vite-CSS entry here).
- */
-
+/* Tailwind v4 entry — CSS-first config (no tailwind.config.js).
+   Imported from apps/web/vite/entry.js. Serves the server-rendered frontend. */
 @import "tailwindcss";
 @import "preline/dist/preline.css";
 

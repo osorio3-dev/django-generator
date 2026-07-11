@@ -17,7 +17,7 @@ export default defineConfig({
       {% if frontend_style == 'vue-spa' -%}
       '@': resolve(__dirname, './apps/web/vue'),
       {%- else -%}
-      '@': resolve(__dirname, './static'),
+      '@': resolve(__dirname, './apps/web/vite'),
       {%- endif %}
     },
   },

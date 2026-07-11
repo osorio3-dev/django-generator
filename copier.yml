@@ -25,6 +25,11 @@ _exclude:
   - "__pycache__/**"
   - "*.pyc"
   - ".DS_Store"
+  # Phantom artifact when admin=false: source filename
+  # `{% if admin %}unfold{% else %}_unfold_disabled{% endif %}.py.jinja`
+  # renders to `_unfold_disabled.py` which is excluded so the generated
+  # `config/settings/` package contains exactly the 5 expected files.
+  - "config/settings/_unfold_disabled.py"
 
 # -----------------------------------------------------------------------------
 # Project identity

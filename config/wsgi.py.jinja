@@ -1,0 +1,9 @@
+"""WSGI configuration for gunicorn/production."""
+
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "{{ django_settings_module }}.production")
+
+application = get_wsgi_application()

@@ -1,0 +1,31 @@
+"""Root URL configuration."""
+
+from django.urls import include, path
+
+from apps.core.views.health import health_check
+
+urlpatterns = [
+    path("health/", health_check, name="health-check"),
+]
+{% if admin %}
+# admin=unfold
+from django.contrib import admin  # noqa: E402
+
+from allauth.account.decorators import secure_admin_login  # noqa: E402
+
+admin.site.login = secure_admin_login(admin.site.login)  # noqa: E402
+
+urlpatterns += [
+    path("admin/", admin.site.urls),
+    path("accounts/", include("apps.accounts.urls")),  # noqa: F405
+    path("accounts/", include("allauth.urls")),
+]
+{%- endif %}
+{% if api %}
+# api=django-ninja
+from apps.api.router import api  # noqa: E402
+
+urlpatterns += [
+    path("api/", api.urls),
+]
+{%- endif %}

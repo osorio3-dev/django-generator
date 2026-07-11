@@ -1,0 +1,27 @@
+"""Local development settings — DEBUG=True, SQLite, console email."""
+
+from config.settings.base import *  # noqa: F403
+
+DEBUG = True
+ALLOWED_HOSTS = ["*"]  # noqa: F405
+
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",  # noqa: F405
+    }
+}
+
+# Use LocMem cache in local dev so RateLimitMiddleware works without Redis.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "{{ project_slug }}-local",
+    }
+}
+{% if admin %}
+# admin=unfold: relax email verification in dev so we can log in immediately.
+ACCOUNT_EMAIL_VERIFICATION = "none"  # noqa: F405
+{%- endif %}

@@ -1,0 +1,53 @@
+"""Production settings — DEBUG=False, PostgreSQL, HTTPS enforced.
+
+Validates SECRET_KEY (blocklist + min length) and ALLOWED_HOSTS (non-empty)
+to prevent the django-boilerplate-v2 footguns.
+"""
+
+import os
+
+from django.core.exceptions import ImproperlyConfigured
+
+from config.settings.base import *  # noqa: F403
+
+DEBUG = False
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")  # noqa: F405
+
+# Strict ALLOWED_HOSTS: never let an empty list reach production.
+_cleaned_hosts = [h.strip() for h in ALLOWED_HOSTS if h.strip()]
+if not _cleaned_hosts:
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS is empty or missing in production. "
+        "Set ALLOWED_HOSTS in .env to a comma-separated list of allowed hostnames."
+    )
+ALLOWED_HOSTS = _cleaned_hosts  # noqa: F405
+
+# Strict SECRET_KEY: block placeholders and weak keys. Sessions signed with a
+# known key can be forged. Never ship with the placeholder.
+_FORBIDDEN_PREFIXES = ("your-secret-key", "django-insecure-", "change-me")
+if any(SECRET_KEY.startswith(prefix) for prefix in _FORBIDDEN_PREFIXES) or len(SECRET_KEY) < 50:
+    raise ImproperlyConfigured(
+        "SECRET_KEY is missing, the .env.example placeholder, or too short (<50 chars). "
+        "Generate one with: "
+        "python -c 'from django.core.management.utils import get_random_secret_key; "
+        "print(get_random_secret_key())'"
+    )
+
+SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "true").lower() == "true"
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Production database — PostgreSQL via env vars.
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ["DB_NAME"],
+        "USER": os.environ["DB_USER"],
+        "PASSWORD": os.environ["DB_PASSWORD"],
+        "HOST": os.environ.get("DB_HOST", "localhost"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+    }
+}

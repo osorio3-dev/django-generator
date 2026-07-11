@@ -1,0 +1,14 @@
+"""Settings package.
+
+Select environment by setting DJANGO_SETTINGS_MODULE:
+- {{ django_settings_module }}.local       (development, default)
+- {{ django_settings_module }}.production  (production)
+- {{ django_settings_module }}.test         (testing)
+"""
+
+import os
+import importlib
+
+_ENVIRONMENT = os.environ.get("DJANGO_ENVIRONMENT", "local")
+_module = importlib.import_module(f"{{ django_settings_module }}.{_ENVIRONMENT}")
+globals().update({k: v for k, v in _module.__dict__.items() if not k.startswith("_")})

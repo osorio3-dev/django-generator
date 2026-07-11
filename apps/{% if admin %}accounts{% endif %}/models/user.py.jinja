@@ -1,0 +1,37 @@
+"""Custom User model with email as username and soft-delete support."""
+
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+
+from apps.accounts.managers import UserManager
+from apps.core.models.base import BaseModel
+
+
+class User(AbstractUser, BaseModel):
+    """Custom user model with email as the unique identifier.
+
+    Inherits from AbstractUser (for auth) and BaseModel (for soft-delete).
+    MRO resolves method resolution in that order.
+    """
+
+    username = None  # Disable username — use email only
+    email = models.EmailField(unique=True)
+    display_name = models.CharField(max_length=150, blank=True, default="")
+    avatar = models.URLField(blank=True, default="")
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = UserManager()
+
+    class Meta:
+        ordering = ["-date_joined"]
+        verbose_name = "User"
+        verbose_name_plural = "Users"
+
+    def __str__(self) -> str:
+        return self.display_name or self.email
+
+    def get_display_name(self) -> str:
+        """Return display_name or fall back to email."""
+        return self.display_name or self.email

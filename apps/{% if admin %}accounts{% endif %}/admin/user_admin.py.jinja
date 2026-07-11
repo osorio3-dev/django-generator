@@ -1,0 +1,33 @@
+"""User admin configuration with django-unfold."""
+
+from django.contrib import admin
+from unfold.admin import ModelAdmin
+
+from apps.accounts.models import User
+
+
+@admin.register(User)
+class UserAdmin(ModelAdmin):
+    """Custom User admin with Unfold integration."""
+
+    list_display = ("email", "display_name", "is_staff", "is_superuser", "date_joined")
+    list_filter = ("is_staff", "is_superuser", "is_active", "deleted_at")
+    search_fields = ("email", "display_name")
+    ordering = ("-date_joined",)
+    fieldsets = (
+        (None, {"fields": ("email", "display_name", "password")}),
+        (
+            "Permissions",
+            {
+                "fields": (
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                )
+            },
+        ),
+        ("Important dates", {"fields": ("last_login", "date_joined")}),
+    )
+    readonly_fields = ("date_joined", "last_login")

@@ -1,0 +1,33 @@
+"""Custom User manager with soft-delete awareness."""
+
+from django.contrib.auth.models import UserManager as DjangoUserManager
+
+from apps.core.models.base import SoftDeleteManager
+
+
+class UserManager(DjangoUserManager, SoftDeleteManager):
+    """Custom user manager that uses email as the unique identifier.
+
+    MRO: DjangoUserManager provides create_user/create_superuser.
+    SoftDeleteManager provides default active-only queryset.
+    """
+
+    def create_user(self, email, password=None, **extra_fields):
+        """Create and save a User with the given email and password."""
+        if not email:
+            raise ValueError("The Email address must be set")
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        """Create and save a SuperUser with the given email and password."""
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        return self.create_user(email, password, **extra_fields)
+
+    def get_queryset(self):
+        """Return queryset excluding soft-deleted records."""
+        return super().get_queryset().filter(deleted_at__isnull=True)

@@ -1,0 +1,31 @@
+"""Allauth adapter that respects soft-delete."""
+
+from django.http import HttpResponseRedirect
+from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
+
+from allauth.account.adapter import DefaultAccountAdapter
+
+
+class AccountAdapter(DefaultAccountAdapter):
+    """Allauth adapter that handles soft-deleted users correctly.
+
+    - delete_user() performs soft-delete instead of hard-delete
+    - is_active() checks deleted_at before reporting active status
+    - respond_user_inactive() shows a custom message for deleted accounts
+    """
+
+    def delete_user(self, request, user):
+        """Soft-delete the user instead of hard-deleting."""
+        user.delete()
+
+    def is_active(self, user) -> bool:
+        """Prevent login for soft-deleted users."""
+        return not user.is_deleted and user.is_active
+
+    def respond_user_inactive(self, request, user):
+        """Show a custom message for deactivated/deleted accounts."""
+        from django.contrib import messages
+
+        messages.error(request, _("This account has been deactivated."))
+        return HttpResponseRedirect(reverse("account_login"))

@@ -1,0 +1,65 @@
+"""Tests for the docker / precommit / github-ci infra modules.
+
+These modules don't ship Python code — they ship build/CI configuration.
+The test just asserts the on-disk presence (or absence) of those files in
+the rendered project.
+"""
+
+from pathlib import Path
+
+import pytest
+
+
+DOCKER_ACTIVE = {% if include_docker %}True{% else %}False{% endif %}
+PRECOMMIT_ACTIVE = {% if include_precommit %}True{% else %}False{% endif %}
+GITHUB_CI_ACTIVE = {% if include_github_actions %}True{% else %}False{% endif %}
+
+
+# ── module-docker ───────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not DOCKER_ACTIVE, reason="module-docker not active")
+def test_docker_files_present(project_root: Path):
+    assert (project_root / "Dockerfile").exists()
+    assert (project_root / "docker-compose.yml").exists()
+    assert (project_root / ".dockerignore").exists()
+
+
+# ── module-precommit ────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not PRECOMMIT_ACTIVE, reason="module-precommit not active")
+def test_precommit_config_present(project_root: Path):
+    assert (project_root / ".pre-commit-config.yaml").exists()
+
+
+# ── module-github-ci ────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not GITHUB_CI_ACTIVE, reason="module-github-ci not active")
+def test_github_workflow_present(project_root: Path):
+    workflow = project_root / ".github" / "workflows" / "ci.yml"
+    assert workflow.exists()
+    content = workflow.read_text()
+    # 4 jobs declared (lint, type-check, test, build-frontend if frontend).
+    assert "lint:" in content
+    assert "type-check:" in content
+    assert "test:" in content
+    if {% if frontend %}True{% else %}False{% endif %}:
+        assert "build-frontend:" in content
+
+
+# ── OFF state: no trace files ───────────────────────────────────────────
+
+
+def test_module_files_not_present_when_disabled(project_root: Path):
+    """Sanity check the OFF state: when a module isn't active, none of its
+    files should be in the rendered project."""
+    if not DOCKER_ACTIVE:
+        assert not (project_root / "Dockerfile").exists()
+        assert not (project_root / "docker-compose.yml").exists()
+        assert not (project_root / ".dockerignore").exists()
+    if not PRECOMMIT_ACTIVE:
+        assert not (project_root / ".pre-commit-config.yaml").exists()
+    if not GITHUB_CI_ACTIVE:
+        assert not (project_root / ".github").exists()

@@ -1,0 +1,59 @@
+# Files to exclude from the Docker build context.
+# Activated only when module-docker is selected.
+
+# Venvs (built inside the image)
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*$py.class
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Local config that should NOT ship to the image (mounted via env_file)
+.env
+.env.local
+.env.*.local
+
+# Local DB
+db.sqlite3
+*.sqlite3
+
+# Frontend build output (rebuilt inside the image if needed)
+static/dist/
+static_root/
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Tests (excluded — production image runs no tests)
+tests/
+
+# Docs / changelog (not needed at runtime)
+*.md
+README.md
+CHANGELOG.md
+DESIGN.md
+
+# Docker-related files (chicken-and-egg — would loop infinitely)
+.docker/
+docker-compose.override.yml
+
+# Git metadata
+.git/
+.gitignore
+
+# Coverage / CI artifacts
+htmlcov/
+.coverage
+coverage.xml
+junit.xml

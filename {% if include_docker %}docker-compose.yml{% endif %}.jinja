@@ -1,0 +1,86 @@
+# docker-compose for {{ project_name }}.
+#
+# Activated only when module-docker is selected. Brings up:
+# - postgres (always)
+# - redis (when realtime OR jobs with redis backend)
+# - app (Django + gunicorn)
+# - q2-cluster (only when include_jobs=true; ORM broker shares the app's DB)
+#
+# All secrets come from .env via env_file. NEVER commit .env.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required in .env}
+      POSTGRES_USER: ${DB_USER:?DB_USER is required in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{%- if include_jobs and jobs_backend == 'redis' or 'module-realtime' in optional_modules %}
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{%- endif %}
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DJANGO_SETTINGS_MODULE: {{ django_settings_module }}.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+{%- if include_jobs and jobs_backend == 'redis' or 'module-realtime' in optional_modules %}
+      redis:
+        condition: service_healthy
+{%- endif %}
+    ports:
+      - "8000:8000"
+{%- if include_jobs %}
+
+  q2-cluster:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DJANGO_SETTINGS_MODULE: {{ django_settings_module }}.production
+    command: python manage.py qcluster
+    depends_on:
+      postgres:
+        condition: service_healthy
+{%- if jobs_backend == 'redis' %}
+      redis:
+        condition: service_healthy
+{%- endif %}
+{%- endif %}
+
+volumes:
+  postgres_data:
+{%- if include_jobs and jobs_backend == 'redis' or 'module-realtime' in optional_modules %}
+  redis_data:
+{%- endif %}

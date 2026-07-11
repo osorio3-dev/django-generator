@@ -6,7 +6,7 @@
   <meta name="description" content="{{ project_name }}">
   <title>{% raw %}{% block title %}{% endraw %}{{ project_name }}{% raw %}{% endblock %}{% endraw %}</title>
   {% raw %}{% vite_hmr_client %}{% endraw %}
-  {% raw %}{% vite_asset 'apps/web/vite/entry.js' %}{% endraw %}
+  {% raw %}{% vite_asset 'apps/web/vue/main.js' %}{% endraw %}
   {% raw %}{% block extra_head %}{% endblock %}{% endraw %}
 </head>
 <body class="min-h-full">

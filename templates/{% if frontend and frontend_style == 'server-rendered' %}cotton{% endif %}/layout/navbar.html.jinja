@@ -1,0 +1,21 @@
+<c-vars brand="" />
+<nav class="bg-white border-b border-gray-200 dark:bg-neutral-800 dark:border-neutral-700">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex justify-between h-16 items-center">
+      <a href="/" class="text-xl font-semibold text-gray-800 dark:text-white">
+        {{ brand|default(project_name) }}
+      </a>
+      <div class="flex items-center gap-x-3">
+        <a href="/" class="text-sm text-gray-700 hover:text-blue-600 dark:text-neutral-300 dark:hover:text-blue-400">Inicio</a>
+        {% raw %}{% if user.is_authenticated %}{% endraw %}
+        <a href="{% raw %}{% url 'web:dashboard' %}{% endraw %}" class="text-sm text-gray-700 hover:text-blue-600 dark:text-neutral-300 dark:hover:text-blue-400">Dashboard</a>
+        <span class="text-sm text-gray-500 dark:text-neutral-400">{% raw %}{{ user.email }}{% endraw %}</span>
+        <form method="post" action="{% raw %}/accounts/logout/{% endraw %}" class="inline">{% raw %}{% csrf_token %}{% endraw %}<button type="submit" class="text-sm text-gray-700 hover:text-red-600 dark:text-neutral-300">Salir</button></form>
+        {% raw %}{% else %}{% endraw %}
+        <a href="{% raw %}/accounts/login/{% endraw %}" class="text-sm text-gray-700 hover:text-blue-600 dark:text-neutral-300 dark:hover:text-blue-400">Ingresar</a>
+        {% raw %}{% endif %}{% endraw %}
+        {{ slot }}
+      </div>
+    </div>
+  </div>
+</nav>

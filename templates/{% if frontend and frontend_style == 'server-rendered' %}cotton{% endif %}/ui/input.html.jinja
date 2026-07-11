@@ -1,0 +1,20 @@
+<c-vars name="" label="" type="text" placeholder="" required="" value="" hx_get="" hx_target="" />
+<div class="w-full">
+  {% if label %}
+  <label class="block text-sm font-medium mb-1 text-gray-700 dark:text-neutral-300" for="id_{{ name }}">
+    {{ label }}
+  </label>
+  {% endif %}
+  <input
+    type="{{ type|default('text') }}"
+    name="{{ name }}"
+    id="id_{{ name }}"
+    {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+    {% if value %}value="{{ value }}"{% endif %}
+    {% if required %}required{% endif %}
+    {% if hx_get %}hx-get="{{ hx_get }}"{% endif %}
+    {% if hx_target %}hx-target="{{ hx_target }}"{% endif %}
+    class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:placeholder-neutral-500"
+  >
+  {{ slot }}
+</div>

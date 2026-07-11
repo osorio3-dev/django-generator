@@ -1,0 +1,30 @@
+{% raw %}{% load django_vite %}<!DOCTYPE html>{% endraw %}
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="{% raw %}{% block meta_description %}{{ project_name }}{% endblock %}{% endraw %}">
+  <title>{% raw %}{% block title %}{% endraw %}{{ project_name }}{% raw %}{% endblock %}{% endraw %}</title>
+  {% raw %}{% vite_hmr_client %}{% endraw %}
+  {% raw %}{% vite_asset 'static/js/main.js' %}{% endraw %}
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  {% raw %}{% block extra_head %}{% endblock %}{% endraw %}
+</head>
+<body class="bg-gray-50 text-gray-900 dark:bg-neutral-900 dark:text-neutral-100 min-h-full flex flex-col">
+  {% raw %}{% block navbar %}{% endraw %}
+  <c-layout.navbar></c-layout.navbar>
+  {% raw %}{% endblock %}{% endraw %}
+
+  <main class="flex-1">
+    {% raw %}{% block content %}{% endblock %}{% endraw %}
+  </main>
+
+  {% raw %}{% block footer %}{% endraw %}
+  <footer class="bg-white border-t border-gray-200 dark:bg-neutral-800 dark:border-neutral-700 mt-12">
+    <div class="max-w-7xl mx-auto px-4 py-6 text-sm text-gray-500 dark:text-neutral-400">
+      &copy; {% raw %}{% now "Y" %}{% endraw %} {{ project_name }}
+    </div>
+  </footer>
+  {% raw %}{% endblock %}{% endraw %}
+</body>
+</html>

@@ -1,0 +1,11 @@
+<c-vars title="" />
+<aside class="bg-white border-r border-gray-200 dark:bg-neutral-800 dark:border-neutral-700 w-64 shrink-0">
+  <div class="p-6">
+    {% if title %}
+    <h2 class="text-xs uppercase tracking-wide font-semibold text-gray-500 dark:text-neutral-400 mb-3">{{ title }}</h2>
+    {% endif %}
+    <nav class="flex flex-col gap-y-1">
+      {{ slot }}
+    </nav>
+  </div>
+</aside>

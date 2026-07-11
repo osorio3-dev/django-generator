@@ -20,6 +20,11 @@ if not _cleaned_hosts:
         "ALLOWED_HOSTS is empty or missing in production. "
         "Set ALLOWED_HOSTS in .env to a comma-separated list of allowed hostnames."
     )
+if "*" in _cleaned_hosts:
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS contains '*' in production. Set specific hostnames instead. "
+        "Wildcard is only allowed in local.py for development."
+    )
 ALLOWED_HOSTS = _cleaned_hosts  # noqa: F405
 
 # Strict SECRET_KEY: block placeholders and weak keys. Sessions signed with a

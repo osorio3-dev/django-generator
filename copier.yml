@@ -49,14 +49,14 @@ project_slug:
 author_name:
   type: str
   help: "Tu nombre o el del equipo (aparece en pyproject y LICENSE)"
-  default: "Jhonatan OSorio"
+  default: "Jhonatan Osorio"
 
 python_version:
   type: str
-  default: "3.12"
+  default: "3.13"
   choices:
-    - "3.12"
     - "3.13"
+    - "3.14"
 
 django_version:
   type: str
@@ -87,6 +87,10 @@ database:
     - "postgresql"
     - "sqlite"
   help: "Motor de DB recomendado en .env.example. 'sqlite' sólo para prototipos; producción exige postgresql."
+  validator: >-
+    {% if database == 'sqlite' and (include_multitenant or 'module-multitenant' in optional_modules) -%}
+    database=sqlite no es compatible con multitenant: schema-per-tenant requiere PostgreSQL. Usá database=postgresql.
+    {%- endif %}
 
 # -----------------------------------------------------------------------------
 # Eje API (opt-in, default OFF)

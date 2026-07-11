@@ -1,0 +1,44 @@
+# {{ project_name }} — tasks comunes
+# Targets están documentados con ## comments para self-documenting help.
+
+.PHONY: help install test check lint type-check migrate makemigrations seed clean runserver start-app
+
+help: ## Show this help message
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+install: ## Install Python dependencies
+	uv sync
+
+check: ## Run Django system check
+	uv run python manage.py check
+
+test: ## Run pytest (pass ARGS for additional arguments)
+	uv run pytest $(ARGS)
+
+lint: ## Run ruff check and format
+	uv run ruff check --fix . && uv run ruff format .
+
+type-check: ## Run mypy
+	uv run mypy .
+
+runserver: ## Start Django dev server
+	uv run python manage.py runserver
+
+migrate: ## Apply pending migrations
+	uv run python manage.py migrate
+
+makemigrations: ## Create new migrations
+	uv run python manage.py makemigrations
+
+seed: ## Seed the database with sample data
+	uv run python manage.py seed_data
+
+start-app: ## Create a new feature app (USAGE: make start-app NAME=billing)
+	uv run python manage.py start_feature_app $(NAME)
+
+clean: ## Remove caches and build artifacts
+	rm -rf __pycache__ .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage
+	rm -rf static_root/
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@echo "Clean complete."

@@ -1,0 +1,104 @@
+# {{ project_name }}
+
+> Generado con [`django-generator`](https://github.com/gentleman-programming/django-generator).
+> Versión del template: ver `.copier-answers.yml`.
+
+## Requisitos
+
+- Python {{ python_version }}+
+- {% if database == "postgresql" -%}
+PostgreSQL 14+
+{%- else -%}
+SQLite (incluido en Python; sólo desarrollo local)
+{%- endif %}
+{% if frontend %}
+- Node 20+ (Vite, Tailwind, Preline)
+{%- endif %}
+- [`uv`](https://docs.astral.sh/uv/) recomendado, o `pip`
+
+## Setup
+
+```bash
+# 1. Variables de entorno
+cp .env.example .env
+# editar SECRET_KEY, DB_*, etc.
+
+# 2. Instalar dependencias Python
+uv sync                  # o: pip install -e .
+
+# 3. Migrar la DB
+uv run python manage.py migrate
+
+# 4. Crear superusuario (cuando admin=unfold)
+uv run python manage.py createsuperuser
+
+# 5. Correr el server
+uv run python manage.py runserver
+```
+
+Abrí <http://localhost:8000/health/> para verificar que arrancó.
+
+## Estructura
+
+```
+{{ project_slug }}/
+├── apps/
+│   ├── core/          # BaseModel + soft delete + RateLimitMiddleware + logging
+{%- if admin %}
+│   └── accounts/      # Custom User (email-first) + AccountAdapter
+{%- endif %}
+├── config/
+│   ├── settings/      # base / local / production / test
+│   ├── urls.py
+│   ├── wsgi.py
+│   └── asgi.py
+└── tests/
+```
+
+## Tests
+
+```bash
+uv run pytest
+```
+
+## Decisiones locked-in (no negociar)
+
+- **Soft-delete universal**: todos los modelos heredan de `BaseModel`. Usá `objects`
+  para activos, `all_objects` para incluir borrados.
+{%- if admin %}
+- **Admin = Unfold o nada**. `django.contrib.admin` está envuelto por Unfold.
+{%- endif %}
+{%- if persists_sensitive_data %}
+- **Fernet activo**: campos sensibles deben usar `EncryptedCharField` /
+  `EncryptedJSONField` desde `apps.core.models.fields` (generado cuando se
+  active el módulo correspondiente).
+{%- endif %}
+- **`RateLimitMiddleware` siempre montado**. Es el bug que tenía
+  `django-boilerplate-v2`; acá se corrige por default.
+- **`DEBUG` parsing case-insensitive** en TODOS los settings.
+- **ALLOWED_HOSTS estricto** en `production.py`: levanta `ImproperlyConfigured`
+  si la lista queda vacía.
+- **SECRET_KEY validator** en `production.py`: rechaza placeholders y claves
+  < 50 chars.
+
+## Actualizar el template
+
+Cuando saques una nueva versión del generador:
+
+```bash
+copier update
+```
+
+Las respuestas originales están en `.copier-answers.yml`. Si hay conflictos,
+los resolvé como en un merge de git.
+
+## Más ayuda
+
+- [`django-patterns`](./.agents/skills/) — patrones Django generales del proyecto
+{%- if admin %}
+- [`unfold-patterns`](./.agents/skills/) — uso de django-unfold en el admin
+{%- endif %}
+
+## Licencia
+
+MIT — {{ author_name }}

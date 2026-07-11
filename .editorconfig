@@ -1,0 +1,29 @@
+# EditorConfig is awesome: https://EditorConfig.org
+# Tells editors (VSCode, PyCharm, vim, etc.) how to format files.
+# Most editors pick this up automatically; install the EditorConfig plugin if needed.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# JavaScript / TypeScript / Vue / config files use 2-space indent
+[*.{js,jsx,ts,tsx,vue,json,yaml,yml,toml,css,scss}]
+indent_size = 2
+
+# Markdown: trailing whitespace matters (line breaks are significant)
+[*.md]
+trim_trailing_whitespace = false
+
+# Shell scripts
+[*.sh]
+end_of_line = lf
+
+# Makefiles require literal tabs, not spaces
+[Makefile]
+indent_style = tab

@@ -1,0 +1,76 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+
+# Static files (Django collectstatic + Vite build output)
+static/
+static_root/
+
+# Media uploads
+media/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.pyc
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Docker
+.docker/
+
+# Django
+db.sqlite3
+*.sqlite3
+*.db
+local_settings.py
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+junit.xml
+.tox/
+
+# direnv
+.envrc
+
+# Copier answers (kept in-repo on purpose so `copier update` works)
+# .copier-answers.yml

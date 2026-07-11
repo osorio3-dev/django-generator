@@ -1,0 +1,9 @@
+"""AutoLogin URL config — only mounted when module-autologin-tests360 is active."""
+
+from django.urls import path
+
+from apps.accounts.autologin.views import autologin
+
+urlpatterns = [
+    path("autologin/<str:token>/", autologin, name="autologin"),
+]

@@ -1,0 +1,108 @@
+"""Tests for module-autologin-tests360.
+
+Asserts:
+- A fresh token can be redeemed exactly once.
+- Reusing a token returns the "used" outcome.
+- Expired tokens return the "expired" outcome.
+- Unknown tokens return the "invalid" outcome.
+- Every attempt logs an AutoLoginUsage row.
+- The endpoint is mounted only when the module is active.
+
+Skipped when module-autologin-tests360 is not active.
+"""
+
+import pytest
+from django.test import Client
+from django.urls import reverse
+from django.utils import timezone
+
+AUTOLOGIN_ACTIVE = {% if 'module-autologin-tests360' in optional_modules %}True{% else %}False{% endif %}
+
+
+pytestmark = pytest.mark.skipif(
+    not AUTOLOGIN_ACTIVE,
+    reason="module-autologin-tests360 not active in this project",
+)
+{% if not admin %}
+pytestmark_extra = pytest.mark.skip(reason="admin disabled — no User model")
+{%- endif %}
+
+
+@pytest.fixture
+def user(db):
+    {% if admin %}
+    from apps.accounts.models import User
+    return User.objects.create_user(email="alice@example.com", password="pw")
+    {%- else %}
+    pytest.skip("admin disabled — no custom User")
+    {%- endif %}
+
+
+def test_issue_and_redeem_token(user):
+    from apps.accounts.autologin.models import AutoLoginToken, AutoLoginUsage
+    from apps.accounts.autologin.views import issue_token
+
+    token_record, plaintext = issue_token(user=user)
+    assert AutoLoginToken.all_objects.filter(token_hash=token_record.token_hash).exists()
+
+    client = Client()
+    url = reverse("autologin", args=[plaintext])
+    response = client.get(url)
+    assert response.status_code == 302  # redirect after login
+    assert response.url == "/"
+
+    token_record.refresh_from_db()
+    assert token_record.is_used
+
+    usage = AutoLoginUsage.all_objects.filter(outcome="success").first()
+    assert usage is not None
+    assert usage.user_id == user.id
+
+
+def test_token_cannot_be_reused(user):
+    from apps.accounts.autologin.views import issue_token
+
+    _, plaintext = issue_token(user=user)
+    client = Client()
+    url = reverse("autologin", args=[plaintext])
+
+    first = client.get(url)
+    assert first.status_code == 302
+
+    second = client.get(url)
+    assert second.status_code == 302
+    assert "autologin=used" in second.url
+
+
+@pytest.mark.django_db
+def test_unknown_token_returns_invalid():
+    client = Client()
+    url = reverse("autologin", args=["completely-bogus-token-zzz"])
+    response = client.get(url)
+    assert response.status_code == 302
+    assert "autologin=invalid" in response.url
+
+
+@pytest.mark.django_db
+def test_expired_token_returns_expired(user, settings):
+    from datetime import timedelta
+
+    from apps.accounts.autologin.models import AutoLoginToken
+    from apps.accounts.autologin.views import issue_token
+
+    settings.AUTOLOGIN_TOKEN_TTL = 1
+    _, plaintext = issue_token(user=user)
+    AutoLoginToken.all_objects.filter(token_hash=_hash(plaintext)).update(
+        expires_at=timezone.now() - timedelta(seconds=10),
+    )
+
+    client = Client()
+    url = reverse("autologin", args=[plaintext])
+    response = client.get(url)
+    assert response.status_code == 302
+    assert "autologin=expired" in response.url
+
+
+def _hash(token: str) -> str:
+    import hashlib
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

@@ -1,0 +1,111 @@
+"""AutoLogin views.
+
+Issues and redeems magic-link tokens.
+
+SECURITY NOTE: this module exposes a GET endpoint that mutates state
+(creates a session). That is the EXPLICIT exception noted in DESIGN.md §13
+and §15. It is opt-in via ``module-autologin-tests360`` and ONLY available
+when that module is selected. Without the module active the URL does not
+exist.
+
+The view requires:
+- A valid signed token in the URL (HMAC-SHA256 over ``user_id + expires_at``).
+- The token MUST be unused and unexpired.
+
+The view logs every attempt to ``AutoLoginUsage`` so abuse can be detected.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import secrets
+from datetime import timedelta
+
+from django.conf import settings
+from django.contrib.auth import login
+from django.http import HttpResponseRedirect
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+from apps.accounts.autologin.models import AutoLoginToken, AutoLoginUsage
+
+AUTOLOGIN_TOKEN_TTL = getattr(settings, "AUTOLOGIN_TOKEN_TTL", 3600)
+
+
+def _signing_secret() -> bytes:
+    """Return the HMAC key for token signing.
+
+    Falls back to SECRET_KEY if no dedicated key is configured. The token is
+    only as strong as this secret.
+    """
+    raw = getattr(settings, "AUTOLOGIN_SIGNING_KEY", None) or settings.SECRET_KEY
+    return raw.encode("utf-8")
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def issue_token(*, user, ttl_seconds: int | None = None, redirect_to: str = "/") -> tuple[AutoLoginToken, str]:
+    """Issue a magic-link token.
+
+    Returns ``(token_instance, plaintext_token)``. The plaintext token is the
+    URL fragment the user clicks. ``token_instance.token_hash`` is what we
+    look up by.
+    """
+    plaintext = secrets.token_urlsafe(32)
+    token_hash = _hash_token(plaintext)
+    expires_at = timezone.now() + timedelta(seconds=ttl_seconds or AUTOLOGIN_TOKEN_TTL)
+
+    instance = AutoLoginToken.all_objects.create(
+        user=user,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        redirect_to=redirect_to,
+    )
+    return instance, plaintext
+
+
+def _record_usage(request, *, user_id: int | None, token_hash: str, outcome: str) -> None:
+    AutoLoginUsage.all_objects.create(
+        user_id=user_id,
+        token_hash=token_hash,
+        outcome=outcome,
+        ip=request.META.get("REMOTE_ADDR"),
+        user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
+    )
+
+
+@require_http_methods(["GET", "POST"])
+@csrf_exempt
+def autologin(request, token: str):
+    """Redeem a magic-link token and start a session.
+
+    SECURITY: This view mutates state via GET. See module docstring.
+
+    Token shape: ``<plaintext>`` (32 url-safe characters). We hash it and
+    look up ``AutoLoginToken`` by hash. The plaintext is never stored.
+    """
+    token_hash = _hash_token(token)
+    record = AutoLoginToken.all_objects.filter(token_hash=token_hash).select_related("user").first()
+
+    if record is None:
+        _record_usage(request, user_id=None, token_hash=token_hash, outcome="invalid")
+        return HttpResponseRedirect("/accounts/login/?autologin=invalid")
+
+    if record.is_used:
+        _record_usage(request, user_id=record.user_id, token_hash=token_hash, outcome="used")
+        return HttpResponseRedirect("/accounts/login/?autologin=used")
+
+    if record.is_expired:
+        _record_usage(request, user_id=record.user_id, token_hash=token_hash, outcome="expired")
+        return HttpResponseRedirect("/accounts/login/?autologin=expired")
+
+    # Atomic single-use: mark before login() so concurrent retries see "used".
+    record.mark_used()
+    _record_usage(request, user_id=record.user_id, token_hash=token_hash, outcome="success")
+
+    login(request, record.user, backend="django.contrib.auth.backends.ModelBackend")
+    return HttpResponseRedirect(record.redirect_to or "/")

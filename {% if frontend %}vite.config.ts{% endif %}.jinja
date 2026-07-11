@@ -15,7 +15,7 @@ export default defineConfig({
   resolve: {
     alias: {
       {% if frontend_style == 'vue-spa' -%}
-      '@': resolve(__dirname, './apps/web/vite'),
+      '@': resolve(__dirname, './apps/web/vue'),
       {%- else -%}
       '@': resolve(__dirname, './static'),
       {%- endif %}
@@ -32,9 +32,9 @@ export default defineConfig({
       input: resolve(
         __dirname,
         {% if frontend_style == 'vue-spa' -%}
-        'apps/web/vite/entry.js',
+        'apps/web/vue/main.js',
         {%- else -%}
-        'static/js/main.js',
+        'apps/web/vite/entry.js',
         {%- endif %}
       ),
     },

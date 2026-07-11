@@ -1,0 +1,36 @@
+"""Empty django-ninja router.
+
+This file is generated when ``api=true`` in copier.yml. Add your endpoints
+here:
+
+    @api.get("/hello")
+    def hello(request):
+        return {"message": "Hello, world!"}
+
+The router is mounted at ``/api/`` via config/urls.py.
+
+DESIGN.md §6.2 — keep this file as the only Django-Ninja entry point. New
+endpoints should be added in their own modules and ``include_router()``'d
+here, not by importing additional NinjaAPI instances.
+
+Pagination is configured via the NINJA_PAGINATION_CLASS setting (see
+config/settings/base.py — defaults to ``ninja.pagination.LimitOffsetPagination``
+when api=true).
+"""
+
+from django.http import HttpRequest
+from ninja import NinjaAPI
+
+api = NinjaAPI(
+    title="{{ project_name }} API",
+    version="0.1.0",
+    description="Django-Ninja API for {{ project_name }}.",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+)
+
+
+@api.get("/health", tags=["health"])
+def health(request: HttpRequest) -> dict[str, str]:
+    """Lightweight liveness probe distinct from /health/ (apps.core.views)."""
+    return {"status": "ok", "surface": "api"}

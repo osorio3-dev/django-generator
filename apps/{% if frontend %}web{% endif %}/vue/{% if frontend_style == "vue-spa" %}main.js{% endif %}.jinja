@@ -1,0 +1,23 @@
+// Vue SPA entry point.
+//
+// createApp(App).use(router).mount('#app') — boots the Vue 3 SPA. Vite bundles
+// this file and writes a manifest to static/dist/manifest.json so django-vite
+// can resolve URLs in production builds.
+//
+// Auth: Django-side via allauth. The Login view posts to /accounts/login/.
+// In dev mode (DEBUG=True) Vite serves this file directly; in production
+// django-vite reads the manifest emitted by `vite build`.
+//
+// DESIGN.md §6.5: this file replaces `apps/web/vite/entry.js` for vue-spa.
+
+{% if frontend_style == 'vue-spa' %}
+import { createApp } from 'vue';
+import App from './App.vue';
+import router from './router.js';
+
+const projectName = {{ project_name | tojson }};
+
+const app = createApp(App, { brand: projectName });
+app.use(router);
+app.mount('#app');
+{% endif %}

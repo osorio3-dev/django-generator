@@ -1,0 +1,26 @@
+// Vue Router — single SPA route.
+//
+// The design (DESIGN.md §6.5) calls for exactly one route: /login. The
+// Login.vue view posts directly to Django's allauth endpoint
+// (/accounts/login/), which sets the session cookie. After auth, allauth
+// redirects to LOGIN_REDIRECT_URL ('/'). The SPA picks up the cookie and
+// any subsequent API calls are authenticated.
+//
+// Add new routes here as the project grows. Do NOT use JWT or localStorage
+// for auth — Django-side sessions via allauth are the locked pattern.
+{% if frontend_style == 'vue-spa' %}
+import { createRouter, createWebHistory } from 'vue-router';
+{%- if vue_router == 'hash' %}
+import { createWebHashHistory } from 'vue-router';
+{%- endif %}
+import Login from './views/Login.vue';
+
+const router = createRouter({
+  history: {% if vue_router == 'hash' %}createWebHashHistory(){% else %}createWebHistory(){% endif %},
+  routes: [
+    { path: '/login', component: Login, name: 'login' },
+  ],
+});
+
+export default router;
+{% endif %}

@@ -1,0 +1,16 @@
+<template>
+  <main id="app">
+    <router-view />
+  </main>
+</template>
+
+<script setup>
+// Minimal shell — the router-view handles the actual content. The brand
+// prop is passed from main.js so the router can expose it via provide/inject
+// if a child view needs it (e.g. a navbar).
+{% if frontend_style == 'vue-spa' %}
+defineProps({
+  brand: { type: String, required: true },
+});
+{% endif %}
+</script>

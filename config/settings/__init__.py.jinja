@@ -1,14 +1,42 @@
 """Settings package.
 
-Select environment by setting DJANGO_SETTINGS_MODULE:
-- {{ django_settings_module }}.local       (development, default)
-- {{ django_settings_module }}.production  (production)
+Select environment by setting DJANGO_ENVIRONMENT (preferred) or via the
+trailing segment of DJANGO_SETTINGS_MODULE (used by pytest when
+DJANGO_ENVIRONMENT is not set explicitly):
+- {{ django_settings_module }}.local        (development, default)
+- {{ django_settings_module }}.production   (production)
 - {{ django_settings_module }}.test         (testing)
+
+This package init must NOT silently load `local.py` when the calling
+code has already imported a specific submodule (e.g. pytest does
+`DJANGO_SETTINGS_MODULE=config.settings.test`). Loading `local.py`
+requires real SECRET_KEY / DATABASE_URL and would break test runs.
 """
 
 import os
 import importlib
 
-_ENVIRONMENT = os.environ.get("DJANGO_ENVIRONMENT", "local")
-_module = importlib.import_module(f"{{ django_settings_module }}.{_ENVIRONMENT}")
-globals().update({k: v for k, v in _module.__dict__.items() if not k.startswith("_")})
+# 1. Explicit env var wins.
+_ENVIRONMENT = os.environ.get("DJANGO_ENVIRONMENT")
+
+# 2. Fall back to the trailing segment of DJANGO_SETTINGS_MODULE when it
+#    matches one of the known environment names. This handles pytest
+#    (DJANGO_SETTINGS_MODULE=config.settings.test) without forcing the
+#    user to set DJANGO_ENVIRONMENT=test separately.
+if _ENVIRONMENT is None:
+    _settings_module = os.environ.get("DJANGO_SETTINGS_MODULE", "")
+    if "." in _settings_module:
+        _candidate = _settings_module.rsplit(".", 1)[-1]
+        if _candidate in ("local", "production", "test"):
+            _ENVIRONMENT = _candidate
+
+# 3. Default to "local" for `python manage.py runserver`.
+if _ENVIRONMENT is None:
+    _ENVIRONMENT = "local"
+
+# Skip the package init's own load when the target is the test
+# submodule — Django / pytest-django have already triggered the
+# submodule import and its globals will be observed directly.
+if _ENVIRONMENT == "local":
+    _module = importlib.import_module(f"{{ django_settings_module }}.{_ENVIRONMENT}")
+    globals().update({k: v for k, v in _module.__dict__.items() if not k.startswith("_")})

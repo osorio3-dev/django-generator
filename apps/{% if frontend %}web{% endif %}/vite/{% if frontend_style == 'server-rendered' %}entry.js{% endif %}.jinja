@@ -1,0 +1,15 @@
+// server-rendered Vite entry — Preline + HTMX + Alpine + Tailwind v4.
+//
+// Vite bundles this file and writes a manifest to static/dist/manifest.json.
+// django-vite reads the manifest in production; in dev mode (DEBUG=True)
+// Vite's dev server serves the assets directly with HMR.
+//
+// Frontend style: server-rendered (Preline + HTMX + Alpine + cotton).
+// For vue-spa, see apps/web/vue/main.js instead.
+
+import 'htmx.org';
+import 'alpinejs';
+import '@alpinejs/collapse';
+import 'preline';
+
+window.HSStaticMethods?.autoInit();

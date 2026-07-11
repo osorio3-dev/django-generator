@@ -2,7 +2,9 @@
 
 from config.settings.base import *  # noqa: F403
 
-DEBUG = False
+# DEBUG=True for tests so django-vite uses dev_mode (no manifest required).
+# Tests that need DEBUG=False explicitly override it locally.
+DEBUG = True
 
 DATABASES = {
     "default": {

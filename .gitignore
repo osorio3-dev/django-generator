@@ -17,7 +17,9 @@ env/
 node_modules/
 
 # Static files (Django collectstatic + Vite build output)
-static/
+# `static/` contains FRONTEND SOURCES that ARE committed (css/, js/, vite/).
+# Only the build output and collected staticfiles should be ignored.
+static/dist/
 static_root/
 
 # Media uploads
